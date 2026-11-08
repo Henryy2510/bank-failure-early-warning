@@ -1,0 +1,17 @@
+# Data directories (never commit raw or processed data to Git)
+data/
+*.parquet
+*.csv.gz
+spark-warehouse/
+derby.log
+metastore_db/
+
+# Python virtual environments & local runtime
+.venv/
+py312/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ipynb_checkpoints/
+outputs/logs/
