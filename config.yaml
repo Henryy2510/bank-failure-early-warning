@@ -1,0 +1,35 @@
+# Central configuration of the pipeline. All paths are relative to the project root (final/).
+paths:
+  raw: ./data_raw/fdic        # output of scripts/00_download.py (starter script layout)
+  data: data                        # bronze / silver / gold layers (git-ignored)
+  outputs: outputs                  # tables, figures, logs (committed)
+
+seed: 42
+
+panel:
+  first_quarter: "1984-03-31"
+  last_quarter: "2026-06-30"
+  publication_lag_days: 60          # Call Report filing deadline (30-35 d) + FDIC publication buffer
+  exit_failure_window_days: 270     # a failure within this window after the last report = exit by failure
+
+label:
+  horizon_quarters: 4               # y = 1{fail in (q, q+4]}
+  last_label_quarter: "2025-06-30"  # later labels are incomplete
+
+split:
+  dev_end: "2007-12-31"             # development period: as-of quarters 1984Q1-2007Q4
+  test_start: "2009-03-31"          # gap 2008Q1-2008Q4 (purge: dev labels look up to 2008Q4)
+  test_end: "2025-06-30"
+  # walk-forward validation blocks inside the development period (inclusive years)
+  cv_blocks: [[1988, 1988], [1990, 1990], [1992, 1992], [1994, 1999], [2000, 2007]]
+
+cost:
+  # cost of a missed failure  = median FDIC Deposit-Insurance-Fund loss (COST) of dev-period failures (data)
+  # cost of a false alarm     = one targeted (off-cycle) examination; assumption, see report section 5.4
+  false_alarm_cost_kusd: 250
+  loss_avoidable_share: 1.0         # share of the DIF loss an early alarm could avoid (sensitivity analysed)
+
+spark:
+  master: "local[*]"
+  driver_memory: "4g"
+  shuffle_partitions: 24

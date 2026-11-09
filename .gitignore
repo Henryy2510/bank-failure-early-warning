@@ -1,5 +1,6 @@
 # Data directories (never commit raw or processed data to Git)
 data/
+data_raw/
 *.parquet
 *.csv.gz
 spark-warehouse/
