@@ -1,0 +1,56 @@
+== Physical Plan ==
+AdaptiveSparkPlan (10)
++- Project (9)
+   +- Window (8)
+      +- Sort (7)
+         +- Exchange (6)
+            +- Project (5)
+               +- Window (4)
+                  +- Sort (3)
+                     +- Exchange (2)
+                        +- Scan parquet  (1)
+
+
+(1) Scan parquet 
+Output [11]: [CERT#0, REPDTE#1, ASSET#3, EQ#6, LNLSGR#10, LNATRES#15, NCLNLS#16, ORE#20, NETINC#21, INTINC#22, YEAR#33]
+Batched: true
+Location: InMemoryFileIndex [file:/home/henry/Documents/backup/usb/UNI subject/4Term1/Big-data-4-fin/big_data_analysis4Fin/final/data/bronze/financials]
+ReadSchema: struct<CERT:int,REPDTE:date,ASSET:double,EQ:double,LNLSGR:double,LNATRES:double,NCLNLS:double,ORE:double,NETINC:double,INTINC:double>
+
+(2) Exchange
+Input [11]: [CERT#0, REPDTE#1, ASSET#3, EQ#6, LNLSGR#10, LNATRES#15, NCLNLS#16, ORE#20, NETINC#21, INTINC#22, YEAR#33]
+Arguments: hashpartitioning(CERT#0, YEAR#33, 8), ENSURE_REQUIREMENTS, [plan_id=26]
+
+(3) Sort
+Input [11]: [CERT#0, REPDTE#1, ASSET#3, EQ#6, LNLSGR#10, LNATRES#15, NCLNLS#16, ORE#20, NETINC#21, INTINC#22, YEAR#33]
+Arguments: [CERT#0 ASC NULLS FIRST, YEAR#33 ASC NULLS FIRST, REPDTE#1 ASC NULLS FIRST], false, 0
+
+(4) Window
+Input [11]: [CERT#0, REPDTE#1, ASSET#3, EQ#6, LNLSGR#10, LNATRES#15, NCLNLS#16, ORE#20, NETINC#21, INTINC#22, YEAR#33]
+Arguments: [lag(NETINC#21, -1, null) windowspecdefinition(CERT#0, YEAR#33, REPDTE#1 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -1, -1)) AS _we0#37, lag(INTINC#22, -1, null) windowspecdefinition(CERT#0, YEAR#33, REPDTE#1 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -1, -1)) AS _we0#39], [CERT#0, YEAR#33], [REPDTE#1 ASC NULLS FIRST]
+
+(5) Project
+Output [16]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, CASE WHEN (quarter(REPDTE#1) = 1) THEN NETINC#21 ELSE (NETINC#21 - _we0#37) END AS NETINC_Q#36, CASE WHEN (quarter(REPDTE#1) = 1) THEN INTINC#22 ELSE (INTINC#22 - _we0#39) END AS INTINC_Q#38, (EQ#6 / (ASSET#3 + 1.0E-4)) AS eq_asset_ratio#40, (NCLNLS#16 / (LNLSGR#10 + 1.0E-4)) AS nclnls_ratio#41, ((coalesce(NCLNLS#16, 0.0) + coalesce(ORE#20, 0.0)) / ((coalesce(EQ#6, 0.0) + coalesce(LNATRES#15, 0.0)) + 1.0E-4)) AS texas_ratio#42]
+Input [13]: [CERT#0, REPDTE#1, ASSET#3, EQ#6, LNLSGR#10, LNATRES#15, NCLNLS#16, ORE#20, NETINC#21, INTINC#22, YEAR#33, _we0#37, _we0#39]
+
+(6) Exchange
+Input [16]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, NETINC_Q#36, INTINC_Q#38, eq_asset_ratio#40, nclnls_ratio#41, texas_ratio#42]
+Arguments: hashpartitioning(CERT#0, 8), ENSURE_REQUIREMENTS, [plan_id=31]
+
+(7) Sort
+Input [16]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, NETINC_Q#36, INTINC_Q#38, eq_asset_ratio#40, nclnls_ratio#41, texas_ratio#42]
+Arguments: [CERT#0 ASC NULLS FIRST, REPDTE#1 ASC NULLS FIRST], false, 0
+
+(8) Window
+Input [16]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, NETINC_Q#36, INTINC_Q#38, eq_asset_ratio#40, nclnls_ratio#41, texas_ratio#42]
+Arguments: [lag(texas_ratio#42, -4, null) windowspecdefinition(CERT#0, REPDTE#1 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -4, -4)) AS _we0#44], [CERT#0], [REPDTE#1 ASC NULLS FIRST]
+
+(9) Project
+Output [18]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, quarter(REPDTE#1) AS quarter#35, NETINC_Q#36, INTINC_Q#38, eq_asset_ratio#40, nclnls_ratio#41, texas_ratio#42, (texas_ratio#42 - _we0#44) AS d4_texas_ratio#43]
+Input [17]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, NETINC_Q#36, INTINC_Q#38, eq_asset_ratio#40, nclnls_ratio#41, texas_ratio#42, _we0#44]
+
+(10) AdaptiveSparkPlan
+Output [18]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, quarter#35, NETINC_Q#36, INTINC_Q#38, eq_asset_ratio#40, nclnls_ratio#41, texas_ratio#42, d4_texas_ratio#43]
+Arguments: isFinalPlan=false
+
+

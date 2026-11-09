@@ -1,0 +1,20 @@
+{
+  "spark": {
+    "row_count": 1682616,
+    "mean_eq_ratio": 0.10672,
+    "mean_texas_ratio": 279390.22162,
+    "mean_netinc_q": 2869.84
+  },
+  "polars": {
+    "row_count": 1682616,
+    "mean_eq_ratio": 0.10672,
+    "mean_texas_ratio": 279390.22162,
+    "mean_netinc_q": 2869.84
+  },
+  "difference": {
+    "row_count_diff": 0,
+    "mean_eq_ratio_abs_diff": 0.0,
+    "mean_texas_ratio_abs_diff": 0.0,
+    "mean_netinc_q_abs_diff": 0.0
+  }
+}

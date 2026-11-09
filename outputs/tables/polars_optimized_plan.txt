@@ -1,0 +1,27 @@
+=== POLARS UNOPTIMIZED LOGICAL PLAN ===
+FILTER col("texas_ratio") > 1.0
+FROM
+   WITH_COLUMNS:
+   [(col("EQ") / (col("ASSET") + 0.0001)).alias("eq_ratio"), ((col("NCLNLS").fill_null([0.0]) + col("ORE").fill_null([0.0])) / ((col("EQ").fill_null([0.0]) + col("LNATRES").fill_null([0.0])) + 0.0001)).alias("texas_ratio")] 
+    SELECT [col("CERT"), col("REPDTE"), col("ASSET"), col("EQ"), col("NCLNLS"), col("ORE"), col("LNATRES")]
+      FILTER col("YEAR") >= 2008
+      FROM
+        Parquet SCAN [/home/henry/Documents/backup/usb/UNI subject/4Term1/Big-data-4-fin/big_data_analysis4Fin/final/data/bronze/financials/YEAR=1984/00000000.parquet, ... 42 other sources]
+        PROJECT 33/34 COLUMNS
+        ESTIMATED ROWS: 1717671
+
+=== POLARS OPTIMIZED PHYSICAL EXECUTION PLAN ===
+FILTER col("texas_ratio") > 1.0
+FROM
+   WITH_COLUMNS:
+   [(col("EQ") / (col("ASSET") + 0.0001)).alias("eq_ratio"), ((col("NCLNLS").fill_null([0.0]) + col("ORE").fill_null([0.0])) / ((col("EQ").fill_null([0.0]) + col("LNATRES").fill_null([0.0])) + 0.0001)).alias("texas_ratio")] 
+    simple π 7/7 ["CERT", "REPDTE", "ASSET", ... 4 other columns]
+      Parquet SCAN [/home/henry/Documents/backup/usb/UNI subject/4Term1/Big-data-4-fin/big_data_analysis4Fin/final/data/bronze/financials/YEAR=2008/00000000.parquet, ... 18 other sources]
+      PROJECT 8/34 COLUMNS
+      SELECTION: col("YEAR") >= 2008
+      ESTIMATED ROWS: 758974
+
+=== ENGINE INTERPRETATION ===
+1. Predicate Pushdown: The year filter (YEAR >= 2008) is pushed down directly into the parquet reader as a Hive partition filter, pruning 1984-2007 files entirely.
+2. Projection Pushdown: Out of 33 available columns, only 7 required fields are scanned from disk.
+3. Multi-threaded Chunked Execution: Polars executes columnar Arrow expressions in parallel across CPU cores with zero Python GIL overhead.

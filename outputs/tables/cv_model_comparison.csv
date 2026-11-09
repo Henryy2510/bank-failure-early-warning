@@ -1,0 +1,5 @@
+model,pr_auc,roc_auc,recall_top_1pct,recall_top_5pct,brier_score
+Texas_Ratio_Baseline,0.1238,0.6204,0.426,0.5727,0.15684
+Logistic_3Var_Baseline,0.4508,0.9804,0.7221,0.955,0.01668
+Logistic_Regression_CAMELS,0.4587,0.9836,0.7563,0.9523,0.01396
+Hist_Gradient_Boosting,0.5303,0.9863,0.7747,0.9565,0.01086

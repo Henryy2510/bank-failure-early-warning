@@ -1,0 +1,5 @@
+format,disk_size_mb,full_read_s,projection_read_s,partition_filter_s,pushdown_supported
+Raw CSV (Uncompressed),444.7,,,,false
+Single Parquet (Snappy),209.8,,,,true
+Single Parquet (Zstandard L3),152.1,0.115,0.008,0.014,true
+"Hive Partitioned Parquet (Year, Zstandard L3)",154.1,0.113,0.026,0.009,true

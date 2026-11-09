@@ -1,0 +1,13 @@
+scale,rows,engine,time_sec,peak_rss_mb
+0.25x (2010-2026),386056,Polars (Lazy),0.158,421.1
+0.25x (2010-2026),386056,Polars (Eager),0.346,434.2
+0.25x (2010-2026),386056,Polars (Streaming),0.152,446.3
+0.25x (2010-2026),386056,Pandas Baseline,1.221,1666.1
+0.55x (1995-2026),977097,Polars (Lazy),0.354,560.4
+0.55x (1995-2026),977097,Polars (Eager),0.773,578.8
+0.55x (1995-2026),977097,Polars (Streaming),0.379,556.8
+0.55x (1995-2026),977097,Pandas Baseline,0.995,2075.5
+1.00x (1984-2026 Full),1682616,Polars (Lazy),0.572,1327.1
+1.00x (1984-2026 Full),1682616,Polars (Eager),1.25,814.9
+1.00x (1984-2026 Full),1682616,Polars (Streaming),0.584,1100.8
+1.00x (1984-2026 Full),1682616,Pandas Baseline,1.211,2231.1

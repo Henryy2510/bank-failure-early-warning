@@ -1,0 +1,299 @@
+{
+  "cross_validation_models": {
+    "Texas_Ratio_Baseline": {
+      "pr_auc": 0.1238,
+      "roc_auc": 0.6204,
+      "recall_top_1pct": 0.426,
+      "recall_top_5pct": 0.5727,
+      "brier_score": 0.15684,
+      "total_failures": 4070,
+      "sample_size": 761079,
+      "fold_details": [
+        {
+          "pr_auc": 0.1611,
+          "roc_auc": 0.448,
+          "recall_top_1pct": 0.1344,
+          "recall_top_5pct": 0.342,
+          "brier_score": 0.18537,
+          "total_failures": 2307,
+          "sample_size": 67329,
+          "val_years": "1988-1988"
+        },
+        {
+          "pr_auc": 0.2938,
+          "roc_auc": 0.7798,
+          "recall_top_1pct": 0.2535,
+          "recall_top_5pct": 0.6808,
+          "brier_score": 0.17076,
+          "total_failures": 1156,
+          "sample_size": 62181,
+          "val_years": "1990-1990"
+        },
+        {
+          "pr_auc": 0.1663,
+          "roc_auc": 0.9171,
+          "recall_top_1pct": 0.441,
+          "recall_top_5pct": 0.8137,
+          "brier_score": 0.16556,
+          "total_failures": 322,
+          "sample_size": 56746,
+          "val_years": "1992-1992"
+        },
+        {
+          "pr_auc": 0.0349,
+          "roc_auc": 0.8951,
+          "recall_top_1pct": 0.7313,
+          "recall_top_5pct": 0.8358,
+          "brier_score": 0.15241,
+          "total_failures": 134,
+          "sample_size": 276906,
+          "val_years": "1994-1999"
+        },
+        {
+          "pr_auc": 0.0138,
+          "roc_auc": 0.8107,
+          "recall_top_1pct": 0.404,
+          "recall_top_5pct": 0.5762,
+          "brier_score": 0.14995,
+          "total_failures": 151,
+          "sample_size": 297917,
+          "val_years": "2000-2007"
+        }
+      ]
+    },
+    "Logistic_3Var_Baseline": {
+      "pr_auc": 0.4508,
+      "roc_auc": 0.9804,
+      "recall_top_1pct": 0.7221,
+      "recall_top_5pct": 0.955,
+      "brier_score": 0.01668,
+      "total_failures": 4070,
+      "sample_size": 761079,
+      "fold_details": [
+        {
+          "pr_auc": 0.7156,
+          "roc_auc": 0.9778,
+          "recall_top_1pct": 0.2596,
+          "recall_top_5pct": 0.795,
+          "brier_score": 0.06603,
+          "total_failures": 2307,
+          "sample_size": 67329,
+          "val_years": "1988-1988"
+        },
+        {
+          "pr_auc": 0.2932,
+          "roc_auc": 0.9688,
+          "recall_top_1pct": 0.1687,
+          "recall_top_5pct": 0.7673,
+          "brier_score": 0.05074,
+          "total_failures": 1156,
+          "sample_size": 62181,
+          "val_years": "1990-1990"
+        },
+        {
+          "pr_auc": 0.2077,
+          "roc_auc": 0.9712,
+          "recall_top_1pct": 0.4969,
+          "recall_top_5pct": 0.9006,
+          "brier_score": 0.02591,
+          "total_failures": 322,
+          "sample_size": 56746,
+          "val_years": "1992-1992"
+        },
+        {
+          "pr_auc": 0.15,
+          "roc_auc": 0.9177,
+          "recall_top_1pct": 0.806,
+          "recall_top_5pct": 0.8657,
+          "brier_score": 0.00727,
+          "total_failures": 134,
+          "sample_size": 276906,
+          "val_years": "1994-1999"
+        },
+        {
+          "pr_auc": 0.0857,
+          "roc_auc": 0.8126,
+          "recall_top_1pct": 0.5099,
+          "recall_top_5pct": 0.6093,
+          "brier_score": 0.00541,
+          "total_failures": 151,
+          "sample_size": 297917,
+          "val_years": "2000-2007"
+        }
+      ]
+    },
+    "Logistic_Regression_CAMELS": {
+      "pr_auc": 0.4587,
+      "roc_auc": 0.9836,
+      "recall_top_1pct": 0.7563,
+      "recall_top_5pct": 0.9523,
+      "brier_score": 0.01396,
+      "total_failures": 4070,
+      "sample_size": 761079,
+      "fold_details": [
+        {
+          "pr_auc": 0.7047,
+          "roc_auc": 0.976,
+          "recall_top_1pct": 0.2562,
+          "recall_top_5pct": 0.7993,
+          "brier_score": 0.05367,
+          "total_failures": 2307,
+          "sample_size": 67329,
+          "val_years": "1988-1988"
+        },
+        {
+          "pr_auc": 0.328,
+          "roc_auc": 0.9723,
+          "recall_top_1pct": 0.1894,
+          "recall_top_5pct": 0.8157,
+          "brier_score": 0.05139,
+          "total_failures": 1156,
+          "sample_size": 62181,
+          "val_years": "1990-1990"
+        },
+        {
+          "pr_auc": 0.281,
+          "roc_auc": 0.979,
+          "recall_top_1pct": 0.6056,
+          "recall_top_5pct": 0.9161,
+          "brier_score": 0.01983,
+          "total_failures": 322,
+          "sample_size": 56746,
+          "val_years": "1992-1992"
+        },
+        {
+          "pr_auc": 0.1419,
+          "roc_auc": 0.9378,
+          "recall_top_1pct": 0.7687,
+          "recall_top_5pct": 0.8507,
+          "brier_score": 0.00477,
+          "total_failures": 134,
+          "sample_size": 276906,
+          "val_years": "1994-1999"
+        },
+        {
+          "pr_auc": 0.0961,
+          "roc_auc": 0.862,
+          "recall_top_1pct": 0.543,
+          "recall_top_5pct": 0.6755,
+          "brier_score": 0.00459,
+          "total_failures": 151,
+          "sample_size": 297917,
+          "val_years": "2000-2007"
+        }
+      ]
+    },
+    "Hist_Gradient_Boosting": {
+      "pr_auc": 0.5303,
+      "roc_auc": 0.9863,
+      "recall_top_1pct": 0.7747,
+      "recall_top_5pct": 0.9565,
+      "brier_score": 0.01086,
+      "total_failures": 4070,
+      "sample_size": 761079,
+      "fold_details": [
+        {
+          "pr_auc": 0.6625,
+          "roc_auc": 0.9768,
+          "recall_top_1pct": 0.2193,
+          "recall_top_5pct": 0.8062,
+          "brier_score": 0.03864,
+          "total_failures": 2307,
+          "sample_size": 67329,
+          "val_years": "1988-1988"
+        },
+        {
+          "pr_auc": 0.5105,
+          "roc_auc": 0.9791,
+          "recall_top_1pct": 0.3382,
+          "recall_top_5pct": 0.8382,
+          "brier_score": 0.05343,
+          "total_failures": 1156,
+          "sample_size": 62181,
+          "val_years": "1990-1990"
+        },
+        {
+          "pr_auc": 0.4374,
+          "roc_auc": 0.983,
+          "recall_top_1pct": 0.6894,
+          "recall_top_5pct": 0.9441,
+          "brier_score": 0.01553,
+          "total_failures": 322,
+          "sample_size": 56746,
+          "val_years": "1992-1992"
+        },
+        {
+          "pr_auc": 0.2526,
+          "roc_auc": 0.9734,
+          "recall_top_1pct": 0.791,
+          "recall_top_5pct": 0.9104,
+          "brier_score": 0.00296,
+          "total_failures": 134,
+          "sample_size": 276906,
+          "val_years": "1994-1999"
+        },
+        {
+          "pr_auc": 0.0792,
+          "roc_auc": 0.8855,
+          "recall_top_1pct": 0.5563,
+          "recall_top_5pct": 0.7086,
+          "brier_score": 0.00214,
+          "total_failures": 151,
+          "sample_size": 297917,
+          "val_years": "2000-2007"
+        }
+      ]
+    }
+  },
+  "cost_threshold_tuning": {
+    "median_dif_cost_kusd": 9814.7,
+    "false_alarm_cost_kusd": 250.0,
+    "optimal_threshold": 0.399,
+    "min_expected_cost_dev": 7070178.67
+  },
+  "held_out_test_evaluation": {
+    "pr_auc": 0.6721,
+    "roc_auc": 0.987,
+    "recall_top_1pct": 0.8509,
+    "recall_top_5pct": 0.9595,
+    "brier_score": 0.01637,
+    "total_failures": 1777,
+    "sample_size": 400698,
+    "baseline_texas_test": {
+      "pr_auc": 0.2567,
+      "roc_auc": 0.9504,
+      "recall_top_1pct": 0.6691,
+      "recall_top_5pct": 0.9122,
+      "brier_score": 0.15657,
+      "total_failures": 1777,
+      "sample_size": 400698
+    },
+    "optimal_threshold": 0.399,
+    "confusion_matrix_at_opt_threshold": {
+      "true_negatives": 389212,
+      "false_positives": 9709,
+      "false_negatives": 82,
+      "true_positives": 1695,
+      "precision": 0.1486,
+      "recall": 0.9539
+    },
+    "subperiod_gfc_2009_2014": {
+      "pr_auc": 0.7057,
+      "roc_auc": 0.9903,
+      "recall_top_1pct": 0.679,
+      "recall_top_5pct": 0.9703,
+      "brier_score": 0.02667,
+      "total_failures": 1648,
+      "sample_size": 178266
+    },
+    "subperiod_modern_2015_2025": {
+      "pr_auc": 0.2984,
+      "roc_auc": 0.9195,
+      "recall_top_1pct": 0.7209,
+      "recall_top_5pct": 0.7287,
+      "brier_score": 0.00812,
+      "total_failures": 129,
+      "sample_size": 222432
+    }
+  }
+}
