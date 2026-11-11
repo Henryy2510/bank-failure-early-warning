@@ -54,13 +54,13 @@ final/
 ├── run_all.sh                         # Master script executing all pipeline stages + pytest suite
 ├── src/bfews/                         # Core modular Python package
 │   ├── __init__.py
+│   ├── core.py                        # Canonical shared definitions (NETINC_Q, CAMELS formulas, checksums)
 │   ├── utils.py                       # Config loader, isolated subprocess RSS/time profiler, markdown helpers
 │   ├── io.py                          # Raw-to-Bronze ingestion, canonical schema casting, Hive partitioning
 │   ├── quality.py                     # Automated DQ audit (schema drift, era missingness, invariants)
 │   ├── panel.py                       # YTD flow de-cumulation, PIT lag, exit classification
 │   ├── labels.py                      # Forward 4Q failure label construction & DEV/PURGE/TEST partitioning
 │   ├── features.py                    # 26 point-in-time CAMELS, Texas Ratio & 4Q lag features
-│   ├── pandas_baseline.py             # Pure Pandas baseline for fair Part 3 benchmarking
 │   ├── spark_jobs.py                  # PySpark Window reproduction, physical plan dump & MLlib LR demo
 │   └── modeling.py                    # Leak-free sklearn Pipeline, walk-forward CV, cost threshold & test eval
 ├── scripts/                           # Sequential CLI entrypoints
@@ -137,11 +137,11 @@ This script runs Steps `00` through `08` and executes `pytest -v tests/` in **~1
 
 | Pipeline Stage | Key Empirical Measurement |
 | :--- | :--- |
-| **Part 1: Storage** | Hive-partitioned Parquet (`YEAR`, Zstd L3) reduces disk footprint from **444.7 MB** (CSV) to **154.1 MB** (**2.89x compression**); single-year partition filter (`YEAR=2023`) executes in **0.009 s** (9 ms). |
-| **Part 2: Quality & Panel** | Resolves 14-column schema drift, pre-2001 `P3ASSET` structural missingness, pre-1990 Basel zeroes (`18.13%`), and YTD cumulative flows; classifies `16,850` merged banks as right-censored ($y=0$) vs. `2,856` failed banks. |
-| **Part 3: Processing** | On the full `1.68M`-row panel, **Polars Lazy** executes in **0.572 s** (Polars Eager RSS: **815 MB**) vs. **Pandas Baseline** **1.211 s** (**2,231 MB** RSS); on temporal sub-slices (`0.25x`), Polars Lazy is **7.7x faster** (`0.158 s` vs. `1.221 s`) with **4.0x lower memory**. Local **PySpark** matches Polars with **`0.0` numerical discrepancy**. |
+| **Part 1: Storage** | Hive-partitioned Parquet (`YEAR`, Zstd L3) reduces disk footprint from **425.7 MB** (CSV) to **154.1 MB** (**2.76x compression**); single-year partition filter (`YEAR=2023`) executes in **0.036 s** with directory-level partition pruning. |
+| **Part 2: Quality & Panel** | Resolves 14-column schema drift, pre-2001 `P3ASSET` structural missingness, pre-1990 Basel zeroes (`18.13%`), and YTD cumulative flows; classifies `16,892` merged banks as right-censored ($y=0$) vs. `2,859` failed banks. Excludes 59.1% non-scorable final quarters (`pit_scorable=False`). |
+| **Part 3: Processing** | On the full `1.68M`-row panel, **Polars Streaming** executes in **0.554 s** (RSS: **1,232 MB**), **Polars Lazy** in **1.264 s** (RSS: **686 MB**) vs. **Pandas Baseline** **1.187 s** (**1,938 MB** RSS, 2.8x higher RAM). On 0.25x slice, Polars is **2.9x faster** with **4.5x lower memory** than naive Pandas. Local **PySpark** matches Polars with **$2.24 \times 10^{-15}$ precision match** and identical row counts across 43 years. |
 | **Part 4: Features** | 26 point-in-time CAMELS + Texas Ratio + 4Q lag features; zero look-ahead verified by automated truncation invariance test (`test_leak_free_property`). |
-| **Part 5: Modelling** | Walk-forward CV PR-AUC: `HistGradientBoosting` (**0.5303**) > `Logistic_CAMELS` (**0.4587**) > `Logistic_3Var` (**0.4508**) > `Texas_Ratio` (**0.1238**). Held-out `TEST` (`2009Q1–2025Q2`): **PR-AUC = 0.6721**, **ROC-AUC = 0.9870**, **Recall@Top-1% = 85.09%**, **Recall@Top-5% = 95.95%**. At $\theta^* = 0.3990$ ($C_{\text{FN}}=\$9,814.7\text{k}$, $C_{\text{FP}}=\$250\text{k}$), captures **95.39%** of failure quarters (`1,695 / 1,777`). Spark MLlib demo Test ROC-AUC = **0.9769**. |
+| **Part 5: Modelling** | Walk-forward CV PR-AUC: `HistGradientBoosting` (**0.5088**) > `Logistic_3Var` (**0.4128**) > `Logistic_CAMELS` (**0.3743**) > `Texas_Ratio` (**0.2642**). Held-out `TEST` (`2009Q1–2025Q2`): **PR-AUC = 0.5541**, **ROC-AUC = 0.9845**, **Recall@Top-1% = 82.75%**, **Recall@Top-5% = 95.46%**. At $\theta^* = 0.010$ ($C_{\text{FN}}=0.196 \times \text{assets}$, $C_{\text{FP}}=\$250\text{k}$), captures **99.59%** of failing banks (`483 / 485`) with **302 days** median lead time. Spark MLlib demo Development ROC-AUC = **0.9399**. |
 
 ---
 
