@@ -1,5 +1,9 @@
-split_group,total_rows,unique_banks,failure_labels,failure_rate_pct,min_quarter,max_quarter
-DEV,1224815,23776,10131,0.827,1984-03-31,2007-12-31
-PURGE,33966,8641,402,1.184,2008-03-31,2008-12-31
-TEST,400698,8451,1777,0.443,2009-03-31,2025-06-30
-POST_SAMPLE,17501,4454,11,0.063,2025-09-30,2026-06-30
+split_group,rows,banks,positive_rows,failing_banks,positive_rate_pct,first_quarter,last_quarter,scope
+DEV,1224815,23776,10117,2680,0.826,1984-03-31,2007-12-31,all rows
+PURGE,33966,8641,402,176,1.184,2008-03-31,2008-12-31,all rows
+TEST,400698,8451,1775,500,0.443,2009-03-31,2025-06-30,all rows
+POST_SAMPLE,17501,4454,11,4,0.063,2025-09-30,2026-06-30,all rows
+DEV,1223542,23757,8844,2661,0.723,1984-03-31,2007-12-31,pit_scorable only (used for modelling)
+PURGE,33922,8639,358,174,1.055,2008-03-31,2008-12-31,pit_scorable only (used for modelling)
+TEST,400332,8436,1409,485,0.352,2009-03-31,2025-06-30,pit_scorable only (used for modelling)
+POST_SAMPLE,17499,4454,9,4,0.051,2025-09-30,2026-06-30,pit_scorable only (used for modelling)

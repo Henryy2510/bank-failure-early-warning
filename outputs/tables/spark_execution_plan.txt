@@ -1,56 +1,66 @@
 == Physical Plan ==
-AdaptiveSparkPlan (10)
-+- Project (9)
-   +- Window (8)
-      +- Sort (7)
-         +- Exchange (6)
-            +- Project (5)
-               +- Window (4)
-                  +- Sort (3)
-                     +- Exchange (2)
-                        +- Scan parquet  (1)
+AdaptiveSparkPlan (12)
++- Project (11)
+   +- Window (10)
+      +- Sort (9)
+         +- Exchange (8)
+            +- Project (7)
+               +- Window (6)
+                  +- Sort (5)
+                     +- Exchange (4)
+                        +- Project (3)
+                           +- Project (2)
+                              +- Scan parquet  (1)
 
 
 (1) Scan parquet 
-Output [11]: [CERT#0, REPDTE#1, ASSET#3, EQ#6, LNLSGR#10, LNATRES#15, NCLNLS#16, ORE#20, NETINC#21, INTINC#22, YEAR#33]
+Output [9]: [CERT#0, REPDTE#1, ASSET#3, EQ#6, LNATRES#15, NCLNLS#16, ORE#20, NETINC#21, YEAR#33]
 Batched: true
 Location: InMemoryFileIndex [file:/home/henry/Documents/backup/usb/UNI subject/4Term1/Big-data-4-fin/big_data_analysis4Fin/final/data/bronze/financials]
-ReadSchema: struct<CERT:int,REPDTE:date,ASSET:double,EQ:double,LNLSGR:double,LNATRES:double,NCLNLS:double,ORE:double,NETINC:double,INTINC:double>
+ReadSchema: struct<CERT:int,REPDTE:date,ASSET:double,EQ:double,LNATRES:double,NCLNLS:double,ORE:double,NETINC:double>
 
-(2) Exchange
-Input [11]: [CERT#0, REPDTE#1, ASSET#3, EQ#6, LNLSGR#10, LNATRES#15, NCLNLS#16, ORE#20, NETINC#21, INTINC#22, YEAR#33]
+(2) Project
+Output [10]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter(REPDTE#1) AS quarter#35]
+Input [9]: [CERT#0, REPDTE#1, ASSET#3, EQ#6, LNATRES#15, NCLNLS#16, ORE#20, NETINC#21, YEAR#33]
+
+(3) Project
+Output [11]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter#35, ((YEAR#33 * 4) + quarter#35) AS qidx#36]
+Input [10]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter#35]
+
+(4) Exchange
+Input [11]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter#35, qidx#36]
 Arguments: hashpartitioning(CERT#0, YEAR#33, 8), ENSURE_REQUIREMENTS, [plan_id=26]
 
-(3) Sort
-Input [11]: [CERT#0, REPDTE#1, ASSET#3, EQ#6, LNLSGR#10, LNATRES#15, NCLNLS#16, ORE#20, NETINC#21, INTINC#22, YEAR#33]
+(5) Sort
+Input [11]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter#35, qidx#36]
 Arguments: [CERT#0 ASC NULLS FIRST, YEAR#33 ASC NULLS FIRST, REPDTE#1 ASC NULLS FIRST], false, 0
 
-(4) Window
-Input [11]: [CERT#0, REPDTE#1, ASSET#3, EQ#6, LNLSGR#10, LNATRES#15, NCLNLS#16, ORE#20, NETINC#21, INTINC#22, YEAR#33]
-Arguments: [lag(NETINC#21, -1, null) windowspecdefinition(CERT#0, YEAR#33, REPDTE#1 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -1, -1)) AS _we0#37, lag(INTINC#22, -1, null) windowspecdefinition(CERT#0, YEAR#33, REPDTE#1 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -1, -1)) AS _we0#39], [CERT#0, YEAR#33], [REPDTE#1 ASC NULLS FIRST]
+(6) Window
+Input [11]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter#35, qidx#36]
+Arguments: [lag(qidx#36, -1, null) windowspecdefinition(CERT#0, YEAR#33, REPDTE#1 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -1, -1)) AS _we0#38, lag(NETINC#21, -1, null) windowspecdefinition(CERT#0, YEAR#33, REPDTE#1 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -1, -1)) AS _we1#39], [CERT#0, YEAR#33], [REPDTE#1 ASC NULLS FIRST]
 
-(5) Project
-Output [16]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, CASE WHEN (quarter(REPDTE#1) = 1) THEN NETINC#21 ELSE (NETINC#21 - _we0#37) END AS NETINC_Q#36, CASE WHEN (quarter(REPDTE#1) = 1) THEN INTINC#22 ELSE (INTINC#22 - _we0#39) END AS INTINC_Q#38, (EQ#6 / (ASSET#3 + 1.0E-4)) AS eq_asset_ratio#40, (NCLNLS#16 / (LNLSGR#10 + 1.0E-4)) AS nclnls_ratio#41, ((coalesce(NCLNLS#16, 0.0) + coalesce(ORE#20, 0.0)) / ((coalesce(EQ#6, 0.0) + coalesce(LNATRES#15, 0.0)) + 1.0E-4)) AS texas_ratio#42]
-Input [13]: [CERT#0, REPDTE#1, ASSET#3, EQ#6, LNLSGR#10, LNATRES#15, NCLNLS#16, ORE#20, NETINC#21, INTINC#22, YEAR#33, _we0#37, _we0#39]
+(7) Project
+Output [14]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter#35, qidx#36, CASE WHEN (quarter#35 = 1) THEN NETINC#21 WHEN (_we0#38 = (qidx#36 - 1)) THEN (NETINC#21 - _we1#39) END AS NETINC_Q#37, (EQ#6 / ASSET#3) AS eq_asset_ratio#40, CASE WHEN ((coalesce(EQ#6, 0.0) + coalesce(LNATRES#15, 0.0)) > 0.0) THEN least(((coalesce(NCLNLS#16, 0.0) + coalesce(ORE#20, 0.0)) / (coalesce(EQ#6, 0.0) + coalesce(LNATRES#15, 0.0))), 10.0) ELSE 10.0 END AS texas_ratio#41]
+Input [13]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter#35, qidx#36, _we0#38, _we1#39]
 
-(6) Exchange
-Input [16]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, NETINC_Q#36, INTINC_Q#38, eq_asset_ratio#40, nclnls_ratio#41, texas_ratio#42]
+(8) Exchange
+Input [14]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter#35, qidx#36, NETINC_Q#37, eq_asset_ratio#40, texas_ratio#41]
 Arguments: hashpartitioning(CERT#0, 8), ENSURE_REQUIREMENTS, [plan_id=31]
 
-(7) Sort
-Input [16]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, NETINC_Q#36, INTINC_Q#38, eq_asset_ratio#40, nclnls_ratio#41, texas_ratio#42]
+(9) Sort
+Input [14]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter#35, qidx#36, NETINC_Q#37, eq_asset_ratio#40, texas_ratio#41]
 Arguments: [CERT#0 ASC NULLS FIRST, REPDTE#1 ASC NULLS FIRST], false, 0
 
-(8) Window
-Input [16]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, NETINC_Q#36, INTINC_Q#38, eq_asset_ratio#40, nclnls_ratio#41, texas_ratio#42]
-Arguments: [lag(texas_ratio#42, -4, null) windowspecdefinition(CERT#0, REPDTE#1 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -4, -4)) AS _we0#44], [CERT#0], [REPDTE#1 ASC NULLS FIRST]
+(10) Window
+Input [14]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter#35, qidx#36, NETINC_Q#37, eq_asset_ratio#40, texas_ratio#41]
+Arguments: [lag(qidx#36, -4, null) windowspecdefinition(CERT#0, REPDTE#1 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -4, -4)) AS _we0#43, lag(ASSET#3, -4, null) windowspecdefinition(CERT#0, REPDTE#1 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -4, -4)) AS _we1#44, lag(qidx#36, -4, null) windowspecdefinition(CERT#0, REPDTE#1 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -4, -4)) AS _we0#46, lag(texas_ratio#41, -4, null) windowspecdefinition(CERT#0, REPDTE#1 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -4, -4)) AS _we1#47], [CERT#0], [REPDTE#1 ASC NULLS FIRST]
 
-(9) Project
-Output [18]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, quarter(REPDTE#1) AS quarter#35, NETINC_Q#36, INTINC_Q#38, eq_asset_ratio#40, nclnls_ratio#41, texas_ratio#42, (texas_ratio#42 - _we0#44) AS d4_texas_ratio#43]
-Input [17]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, NETINC_Q#36, INTINC_Q#38, eq_asset_ratio#40, nclnls_ratio#41, texas_ratio#42, _we0#44]
+(11) Project
+Output [16]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter#35, qidx#36, NETINC_Q#37, eq_asset_ratio#40, texas_ratio#41, CASE WHEN (_we0#43 = (qidx#36 - 4)) THEN ((ASSET#3 / _we1#44) - 1.0) END AS asset_growth_4q#42, CASE WHEN (_we0#46 = (qidx#36 - 4)) THEN (texas_ratio#41 - _we1#47) END AS d4_texas_ratio#45]
+Input [18]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter#35, qidx#36, NETINC_Q#37, eq_asset_ratio#40, texas_ratio#41, _we0#43, _we1#44, _we0#46, _we1#47]
 
-(10) AdaptiveSparkPlan
-Output [18]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, LNLSGR#10, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, INTINC#22, quarter#35, NETINC_Q#36, INTINC_Q#38, eq_asset_ratio#40, nclnls_ratio#41, texas_ratio#42, d4_texas_ratio#43]
+(12) AdaptiveSparkPlan
+Output [16]: [CERT#0, REPDTE#1, YEAR#33, ASSET#3, EQ#6, NCLNLS#16, ORE#20, LNATRES#15, NETINC#21, quarter#35, qidx#36, NETINC_Q#37, eq_asset_ratio#40, texas_ratio#41, asset_growth_4q#42, d4_texas_ratio#45]
 Arguments: isFinalPlan=false
 
 

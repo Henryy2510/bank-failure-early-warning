@@ -1,0 +1,14 @@
+{
+  "rows": 1682616,
+  "banks": 24064,
+  "failed_banks": 2859,
+  "failed_banks_by_type": {
+    "FAILURE": 2575,
+    "ASSISTANCE": 284
+  },
+  "failure_record_but_reports_long_after": {
+    "FAILURE": 229,
+    "ASSISTANCE": 146
+  },
+  "failure_record_but_still_active": 7
+}

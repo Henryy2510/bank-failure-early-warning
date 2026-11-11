@@ -1,20 +1,20 @@
 {
-  "spark": {
-    "row_count": 1682616,
-    "mean_eq_ratio": 0.10672,
-    "mean_texas_ratio": 279390.22162,
-    "mean_netinc_q": 2869.84
+  "yearly_fingerprint": {
+    "years_compared": 43,
+    "row_and_null_counts_identical": true,
+    "max_relative_diff_of_sums": 2.2382624412157772e-15
   },
-  "polars": {
-    "row_count": 1682616,
-    "mean_eq_ratio": 0.10672,
-    "mean_texas_ratio": 279390.22162,
-    "mean_netinc_q": 2869.84
+  "row_level_sample": {
+    "banks_sampled": 483,
+    "rows_compared": 33042,
+    "rows_only_in_one_engine": 0,
+    "max_abs_diff_any_column": 0.0
   },
-  "difference": {
-    "row_count_diff": 0,
-    "mean_eq_ratio_abs_diff": 0.0,
-    "mean_texas_ratio_abs_diff": 0.0,
-    "mean_netinc_q_abs_diff": 0.0
+  "timing_seconds": {
+    "polars_lazy_collect_plus_aggregate": 0.6,
+    "spark_session_startup": 3.9,
+    "spark_job_cold": 4.84,
+    "spark_job_warm": 1.93,
+    "note": "single in-process runs on the full panel; Spark = local[2], 1.2 GB driver"
   }
 }

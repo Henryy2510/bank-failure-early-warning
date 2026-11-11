@@ -1,0 +1,169 @@
+{
+  "manifest": {
+    "quarters_downloaded": 170,
+    "total_manifest_rows": 1682616,
+    "incomplete_quarters": [],
+    "api_mismatch_quarters": []
+  },
+  "validity": {
+    "rows": 1682616,
+    "asset_nonpositive": 0,
+    "negative_equity": 15659,
+    "negative_equity_pct": 0.931,
+    "deposits_exceed_assets": 6204,
+    "deposits_exceed_assets_with_negative_equity": 6202,
+    "domestic_exceeds_total_deposits": 0,
+    "net_loans_exceed_gross_loans": 15,
+    "extreme_roa": 1056,
+    "extreme_roe": 4624,
+    "pre1990_rows": 419414,
+    "pre1990_rbc1_zero_pct": 18.13,
+    "p3asset_null_pct": 57.8
+  },
+  "failures": {
+    "events_all_time": 4117,
+    "events_without_cert": 488,
+    "events_since_1984": 3275,
+    "events_since_1984_with_cert": 3275,
+    "events_matched_to_panel": 3253,
+    "events_not_in_panel": 22,
+    "restype_since_1984": {
+      "FAILURE": 2863,
+      "ASSISTANCE": 412
+    },
+    "certs_with_multiple_events": 88,
+    "failed_banks_in_panel": 3211,
+    "gap_median_days": 49.0,
+    "gap_p95_days": 111.0,
+    "share_last_report_not_scorable": 59.1,
+    "publication_lag_days": 60
+  },
+  "schema_drift_columns": [
+    "CHBAL",
+    "DEP",
+    "DEPDOM",
+    "LNCI",
+    "LNCON",
+    "LNLSGR",
+    "LNLSNET",
+    "LNRE",
+    "NAASSET",
+    "NCLNLS",
+    "P3ASSET",
+    "P9ASSET",
+    "RBCRWAJ",
+    "SC"
+  ],
+  "missingness_by_era": [
+    {
+      "era": 1980,
+      "rows": 71760,
+      "P3ASSET null %": 100.0,
+      "P9ASSET null %": 19.2,
+      "NAASSET null %": 19.2,
+      "ELNATR null %": 18.5,
+      "NTLNLS null %": 18.5,
+      "RBC1AAJ null %": 0.0,
+      "EQ null %": 0.2
+    },
+    {
+      "era": 1985,
+      "rows": 347654,
+      "P3ASSET null %": 100.0,
+      "P9ASSET null %": 18.4,
+      "NAASSET null %": 18.4,
+      "ELNATR null %": 7.6,
+      "NTLNLS null %": 18.2,
+      "RBC1AAJ null %": 0.0,
+      "EQ null %": 0.2
+    },
+    {
+      "era": 1990,
+      "rows": 286105,
+      "P3ASSET null %": 100.0,
+      "P9ASSET null %": 0.0,
+      "NAASSET null %": 0.0,
+      "ELNATR null %": 0.3,
+      "NTLNLS null %": 0.3,
+      "RBC1AAJ null %": 0.0,
+      "EQ null %": 0.3
+    },
+    {
+      "era": 1995,
+      "rows": 225775,
+      "P3ASSET null %": 100.0,
+      "P9ASSET null %": 0.0,
+      "NAASSET null %": 0.0,
+      "ELNATR null %": 0.3,
+      "NTLNLS null %": 0.3,
+      "RBC1AAJ null %": 0.0,
+      "EQ null %": 0.3
+    },
+    {
+      "era": 2000,
+      "rows": 192271,
+      "P3ASSET null %": 21.1,
+      "P9ASSET null %": 0.0,
+      "NAASSET null %": 0.0,
+      "ELNATR null %": 0.2,
+      "NTLNLS null %": 0.2,
+      "RBC1AAJ null %": 0.0,
+      "EQ null %": 0.2
+    },
+    {
+      "era": 2005,
+      "rows": 172995,
+      "P3ASSET null %": 0.0,
+      "P9ASSET null %": 0.0,
+      "NAASSET null %": 0.0,
+      "ELNATR null %": 0.2,
+      "NTLNLS null %": 0.2,
+      "RBC1AAJ null %": 0.0,
+      "EQ null %": 0.2
+    },
+    {
+      "era": 2010,
+      "rows": 145726,
+      "P3ASSET null %": 0.0,
+      "P9ASSET null %": 0.0,
+      "NAASSET null %": 0.0,
+      "ELNATR null %": 0.2,
+      "NTLNLS null %": 0.2,
+      "RBC1AAJ null %": 0.0,
+      "EQ null %": 0.2
+    },
+    {
+      "era": 2015,
+      "rows": 116869,
+      "P3ASSET null %": 0.0,
+      "P9ASSET null %": 0.0,
+      "NAASSET null %": 0.0,
+      "ELNATR null %": 0.3,
+      "NTLNLS null %": 0.3,
+      "RBC1AAJ null %": 0.0,
+      "EQ null %": 0.3
+    },
+    {
+      "era": 2020,
+      "rows": 96902,
+      "P3ASSET null %": 0.0,
+      "P9ASSET null %": 0.0,
+      "NAASSET null %": 0.0,
+      "ELNATR null %": 0.4,
+      "NTLNLS null %": 0.4,
+      "RBC1AAJ null %": 0.0,
+      "EQ null %": 0.4
+    },
+    {
+      "era": 2025,
+      "rows": 26559,
+      "P3ASSET null %": 0.0,
+      "P9ASSET null %": 0.0,
+      "NAASSET null %": 0.0,
+      "ELNATR null %": 0.4,
+      "NTLNLS null %": 0.4,
+      "RBC1AAJ null %": 0.0,
+      "EQ null %": 0.4
+    }
+  ]
+}

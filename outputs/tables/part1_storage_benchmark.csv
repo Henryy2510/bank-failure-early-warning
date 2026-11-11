@@ -1,5 +1,7 @@
-format,disk_size_mb,full_read_s,projection_read_s,partition_filter_s,pushdown_supported
-Raw CSV (Uncompressed),444.7,,,,false
-Single Parquet (Snappy),209.8,,,,true
-Single Parquet (Zstandard L3),152.1,0.115,0.008,0.014,true
-"Hive Partitioned Parquet (Year, Zstandard L3)",154.1,0.113,0.026,0.009,true
+format,size_mb,full_read_s,read_3_cols_s,filter_2023_s,compression_vs_csv
+CSV (uncompressed),425.7,0.599,0.193,0.576,1.0
+"Parquet single file, Snappy",210.8,0.144,0.031,0.026,2.02
+"Parquet single file, Zstd-3",153.8,0.179,0.03,0.033,2.77
+"Parquet hive YEAR=, Zstd-3 (chosen)",154.1,0.192,0.04,0.036,2.76
+pandas.read_csv (CSV),425.7,0.592,,,1.0
+pandas.read_parquet (single Zstd-3),153.8,0.631,,,2.77

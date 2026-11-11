@@ -1,4 +1,4 @@
-exit_status,unique_banks,panel_rows
-MERGED_OR_OTHER,16850,917074
-ACTIVE,4358,678370
-FAILED,2856,87172
+exit_status,banks,bank_quarters,banks_with_failure_record
+MERGED_OR_OTHER,16892,923166,375
+ACTIVE,4313,671777,7
+FAILED,2859,87673,2859

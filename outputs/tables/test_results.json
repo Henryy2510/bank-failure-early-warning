@@ -1,299 +1,382 @@
 {
   "cross_validation_models": {
-    "Texas_Ratio_Baseline": {
-      "pr_auc": 0.1238,
-      "roc_auc": 0.6204,
-      "recall_top_1pct": 0.426,
-      "recall_top_5pct": 0.5727,
-      "brier_score": 0.15684,
-      "total_failures": 4070,
-      "sample_size": 761079,
-      "fold_details": [
+    "Texas ratio rule": {
+      "pr_auc": 0.2642,
+      "roc_auc": 0.9734,
+      "recall_top_1pct": 0.6665,
+      "recall_top_5pct": 0.929,
+      "brier_score": 0.00724,
+      "positive_rows": 3547,
+      "rows": 760559,
+      "folds": [
         {
-          "pr_auc": 0.1611,
-          "roc_auc": 0.448,
-          "recall_top_1pct": 0.1344,
-          "recall_top_5pct": 0.342,
-          "brier_score": 0.18537,
-          "total_failures": 2307,
-          "sample_size": 67329,
-          "val_years": "1988-1988"
+          "pr_auc": 0.5528,
+          "roc_auc": 0.9708,
+          "recall_top_1pct": 0.1913,
+          "recall_top_5pct": 0.8092,
+          "brier_score": 0.02206,
+          "positive_rows": 2028,
+          "rows": 67050,
+          "val_years": "1988-1988",
+          "failing_banks": 828
         },
         {
-          "pr_auc": 0.2938,
-          "roc_auc": 0.7798,
-          "recall_top_1pct": 0.2535,
-          "recall_top_5pct": 0.6808,
-          "brier_score": 0.17076,
-          "total_failures": 1156,
-          "sample_size": 62181,
-          "val_years": "1990-1990"
+          "pr_auc": 0.2329,
+          "roc_auc": 0.9538,
+          "recall_top_1pct": 0.1285,
+          "recall_top_5pct": 0.7988,
+          "brier_score": 0.02493,
+          "positive_rows": 1004,
+          "rows": 62029,
+          "val_years": "1990-1990",
+          "failing_banks": 466
         },
         {
-          "pr_auc": 0.1663,
-          "roc_auc": 0.9171,
-          "recall_top_1pct": 0.441,
-          "recall_top_5pct": 0.8137,
-          "brier_score": 0.16556,
-          "total_failures": 322,
-          "sample_size": 56746,
-          "val_years": "1992-1992"
+          "pr_auc": 0.104,
+          "roc_auc": 0.948,
+          "recall_top_1pct": 0.305,
+          "recall_top_5pct": 0.8263,
+          "brier_score": 0.01069,
+          "positive_rows": 259,
+          "rows": 56686,
+          "val_years": "1992-1992",
+          "failing_banks": 130
         },
         {
-          "pr_auc": 0.0349,
-          "roc_auc": 0.8951,
-          "recall_top_1pct": 0.7313,
-          "recall_top_5pct": 0.8358,
-          "brier_score": 0.15241,
-          "total_failures": 134,
-          "sample_size": 276906,
-          "val_years": "1994-1999"
+          "pr_auc": 0.0243,
+          "roc_auc": 0.9048,
+          "recall_top_1pct": 0.7179,
+          "recall_top_5pct": 0.8376,
+          "brier_score": 0.0038,
+          "positive_rows": 117,
+          "rows": 276889,
+          "val_years": "1994-1999",
+          "failing_banks": 44
         },
         {
-          "pr_auc": 0.0138,
-          "roc_auc": 0.8107,
-          "recall_top_1pct": 0.404,
-          "recall_top_5pct": 0.5762,
-          "brier_score": 0.14995,
-          "total_failures": 151,
-          "sample_size": 297917,
-          "val_years": "2000-2007"
+          "pr_auc": 0.0109,
+          "roc_auc": 0.8274,
+          "recall_top_1pct": 0.4029,
+          "recall_top_5pct": 0.5971,
+          "brier_score": 0.00277,
+          "positive_rows": 139,
+          "rows": 297905,
+          "val_years": "2000-2007",
+          "failing_banks": 59
         }
       ]
     },
-    "Logistic_3Var_Baseline": {
-      "pr_auc": 0.4508,
-      "roc_auc": 0.9804,
-      "recall_top_1pct": 0.7221,
-      "recall_top_5pct": 0.955,
-      "brier_score": 0.01668,
-      "total_failures": 4070,
-      "sample_size": 761079,
-      "fold_details": [
+    "Logistic, 3 variables": {
+      "pr_auc": 0.4128,
+      "roc_auc": 0.9793,
+      "recall_top_1pct": 0.7291,
+      "recall_top_5pct": 0.9566,
+      "brier_score": 0.01733,
+      "positive_rows": 3547,
+      "rows": 760559,
+      "folds": [
         {
-          "pr_auc": 0.7156,
-          "roc_auc": 0.9778,
-          "recall_top_1pct": 0.2596,
-          "recall_top_5pct": 0.795,
-          "brier_score": 0.06603,
-          "total_failures": 2307,
-          "sample_size": 67329,
-          "val_years": "1988-1988"
+          "pr_auc": 0.6984,
+          "roc_auc": 0.9809,
+          "recall_top_1pct": 0.2865,
+          "recall_top_5pct": 0.8176,
+          "brier_score": 0.06879,
+          "positive_rows": 2028,
+          "rows": 67050,
+          "val_years": "1988-1988",
+          "failing_banks": 828
         },
         {
-          "pr_auc": 0.2932,
-          "roc_auc": 0.9688,
-          "recall_top_1pct": 0.1687,
-          "recall_top_5pct": 0.7673,
-          "brier_score": 0.05074,
-          "total_failures": 1156,
-          "sample_size": 62181,
-          "val_years": "1990-1990"
+          "pr_auc": 0.2522,
+          "roc_auc": 0.9665,
+          "recall_top_1pct": 0.1703,
+          "recall_top_5pct": 0.759,
+          "brier_score": 0.05172,
+          "positive_rows": 1004,
+          "rows": 62029,
+          "val_years": "1990-1990",
+          "failing_banks": 466
         },
         {
-          "pr_auc": 0.2077,
-          "roc_auc": 0.9712,
-          "recall_top_1pct": 0.4969,
-          "recall_top_5pct": 0.9006,
-          "brier_score": 0.02591,
-          "total_failures": 322,
-          "sample_size": 56746,
-          "val_years": "1992-1992"
+          "pr_auc": 0.1558,
+          "roc_auc": 0.9685,
+          "recall_top_1pct": 0.4672,
+          "recall_top_5pct": 0.8803,
+          "brier_score": 0.02695,
+          "positive_rows": 259,
+          "rows": 56686,
+          "val_years": "1992-1992",
+          "failing_banks": 130
         },
         {
-          "pr_auc": 0.15,
-          "roc_auc": 0.9177,
-          "recall_top_1pct": 0.806,
-          "recall_top_5pct": 0.8657,
-          "brier_score": 0.00727,
-          "total_failures": 134,
-          "sample_size": 276906,
-          "val_years": "1994-1999"
+          "pr_auc": 0.12,
+          "roc_auc": 0.9058,
+          "recall_top_1pct": 0.7778,
+          "recall_top_5pct": 0.8462,
+          "brier_score": 0.00765,
+          "positive_rows": 117,
+          "rows": 276889,
+          "val_years": "1994-1999",
+          "failing_banks": 44
         },
         {
-          "pr_auc": 0.0857,
-          "roc_auc": 0.8126,
-          "recall_top_1pct": 0.5099,
-          "recall_top_5pct": 0.6093,
-          "brier_score": 0.00541,
-          "total_failures": 151,
-          "sample_size": 297917,
-          "val_years": "2000-2007"
+          "pr_auc": 0.0634,
+          "roc_auc": 0.8056,
+          "recall_top_1pct": 0.4892,
+          "recall_top_5pct": 0.5971,
+          "brier_score": 0.00575,
+          "positive_rows": 139,
+          "rows": 297905,
+          "val_years": "2000-2007",
+          "failing_banks": 59
         }
       ]
     },
-    "Logistic_Regression_CAMELS": {
-      "pr_auc": 0.4587,
-      "roc_auc": 0.9836,
-      "recall_top_1pct": 0.7563,
-      "recall_top_5pct": 0.9523,
-      "brier_score": 0.01396,
-      "total_failures": 4070,
-      "sample_size": 761079,
-      "fold_details": [
-        {
-          "pr_auc": 0.7047,
-          "roc_auc": 0.976,
-          "recall_top_1pct": 0.2562,
-          "recall_top_5pct": 0.7993,
-          "brier_score": 0.05367,
-          "total_failures": 2307,
-          "sample_size": 67329,
-          "val_years": "1988-1988"
-        },
-        {
-          "pr_auc": 0.328,
-          "roc_auc": 0.9723,
-          "recall_top_1pct": 0.1894,
-          "recall_top_5pct": 0.8157,
-          "brier_score": 0.05139,
-          "total_failures": 1156,
-          "sample_size": 62181,
-          "val_years": "1990-1990"
-        },
-        {
-          "pr_auc": 0.281,
-          "roc_auc": 0.979,
-          "recall_top_1pct": 0.6056,
-          "recall_top_5pct": 0.9161,
-          "brier_score": 0.01983,
-          "total_failures": 322,
-          "sample_size": 56746,
-          "val_years": "1992-1992"
-        },
-        {
-          "pr_auc": 0.1419,
-          "roc_auc": 0.9378,
-          "recall_top_1pct": 0.7687,
-          "recall_top_5pct": 0.8507,
-          "brier_score": 0.00477,
-          "total_failures": 134,
-          "sample_size": 276906,
-          "val_years": "1994-1999"
-        },
-        {
-          "pr_auc": 0.0961,
-          "roc_auc": 0.862,
-          "recall_top_1pct": 0.543,
-          "recall_top_5pct": 0.6755,
-          "brier_score": 0.00459,
-          "total_failures": 151,
-          "sample_size": 297917,
-          "val_years": "2000-2007"
-        }
-      ]
-    },
-    "Hist_Gradient_Boosting": {
-      "pr_auc": 0.5303,
-      "roc_auc": 0.9863,
-      "recall_top_1pct": 0.7747,
-      "recall_top_5pct": 0.9565,
-      "brier_score": 0.01086,
-      "total_failures": 4070,
-      "sample_size": 761079,
-      "fold_details": [
+    "Logistic, 26 CAMELS": {
+      "pr_auc": 0.3743,
+      "roc_auc": 0.9815,
+      "recall_top_1pct": 0.735,
+      "recall_top_5pct": 0.9431,
+      "brier_score": 0.01407,
+      "positive_rows": 3547,
+      "rows": 760559,
+      "folds": [
         {
           "pr_auc": 0.6625,
-          "roc_auc": 0.9768,
-          "recall_top_1pct": 0.2193,
-          "recall_top_5pct": 0.8062,
-          "brier_score": 0.03864,
-          "total_failures": 2307,
-          "sample_size": 67329,
-          "val_years": "1988-1988"
+          "roc_auc": 0.9726,
+          "recall_top_1pct": 0.2816,
+          "recall_top_5pct": 0.7845,
+          "brier_score": 0.04778,
+          "positive_rows": 2028,
+          "rows": 67050,
+          "val_years": "1988-1988",
+          "failing_banks": 828
         },
         {
-          "pr_auc": 0.5105,
-          "roc_auc": 0.9791,
-          "recall_top_1pct": 0.3382,
-          "recall_top_5pct": 0.8382,
-          "brier_score": 0.05343,
-          "total_failures": 1156,
-          "sample_size": 62181,
-          "val_years": "1990-1990"
+          "pr_auc": 0.2925,
+          "roc_auc": 0.9707,
+          "recall_top_1pct": 0.1982,
+          "recall_top_5pct": 0.8157,
+          "brier_score": 0.05154,
+          "positive_rows": 1004,
+          "rows": 62029,
+          "val_years": "1990-1990",
+          "failing_banks": 466
         },
         {
-          "pr_auc": 0.4374,
-          "roc_auc": 0.983,
-          "recall_top_1pct": 0.6894,
-          "recall_top_5pct": 0.9441,
-          "brier_score": 0.01553,
-          "total_failures": 322,
-          "sample_size": 56746,
-          "val_years": "1992-1992"
+          "pr_auc": 0.2086,
+          "roc_auc": 0.9775,
+          "recall_top_1pct": 0.583,
+          "recall_top_5pct": 0.9035,
+          "brier_score": 0.02109,
+          "positive_rows": 259,
+          "rows": 56686,
+          "val_years": "1992-1992",
+          "failing_banks": 130
         },
         {
-          "pr_auc": 0.2526,
-          "roc_auc": 0.9734,
-          "recall_top_1pct": 0.791,
-          "recall_top_5pct": 0.9104,
-          "brier_score": 0.00296,
-          "total_failures": 134,
-          "sample_size": 276906,
-          "val_years": "1994-1999"
+          "pr_auc": 0.1024,
+          "roc_auc": 0.9318,
+          "recall_top_1pct": 0.7436,
+          "recall_top_5pct": 0.8291,
+          "brier_score": 0.00526,
+          "positive_rows": 117,
+          "rows": 276889,
+          "val_years": "1994-1999",
+          "failing_banks": 44
         },
         {
-          "pr_auc": 0.0792,
-          "roc_auc": 0.8855,
-          "recall_top_1pct": 0.5563,
-          "recall_top_5pct": 0.7086,
-          "brier_score": 0.00214,
-          "total_failures": 151,
-          "sample_size": 297917,
-          "val_years": "2000-2007"
+          "pr_auc": 0.0344,
+          "roc_auc": 0.8619,
+          "recall_top_1pct": 0.5252,
+          "recall_top_5pct": 0.6691,
+          "brier_score": 0.00553,
+          "positive_rows": 139,
+          "rows": 297905,
+          "val_years": "2000-2007",
+          "failing_banks": 59
+        }
+      ]
+    },
+    "HistGradientBoosting, 26 CAMELS": {
+      "pr_auc": 0.5088,
+      "roc_auc": 0.9863,
+      "recall_top_1pct": 0.7838,
+      "recall_top_5pct": 0.9549,
+      "brier_score": 0.01036,
+      "positive_rows": 3547,
+      "rows": 760559,
+      "folds": [
+        {
+          "pr_auc": 0.6372,
+          "roc_auc": 0.9779,
+          "recall_top_1pct": 0.2372,
+          "recall_top_5pct": 0.8323,
+          "brier_score": 0.03747,
+          "positive_rows": 2028,
+          "rows": 67050,
+          "val_years": "1988-1988",
+          "failing_banks": 828
+        },
+        {
+          "pr_auc": 0.4718,
+          "roc_auc": 0.9774,
+          "recall_top_1pct": 0.3944,
+          "recall_top_5pct": 0.8347,
+          "brier_score": 0.04921,
+          "positive_rows": 1004,
+          "rows": 62029,
+          "val_years": "1990-1990",
+          "failing_banks": 466
+        },
+        {
+          "pr_auc": 0.4014,
+          "roc_auc": 0.9808,
+          "recall_top_1pct": 0.6602,
+          "recall_top_5pct": 0.9189,
+          "brier_score": 0.01561,
+          "positive_rows": 259,
+          "rows": 56686,
+          "val_years": "1992-1992",
+          "failing_banks": 130
+        },
+        {
+          "pr_auc": 0.2153,
+          "roc_auc": 0.9703,
+          "recall_top_1pct": 0.7436,
+          "recall_top_5pct": 0.8974,
+          "brier_score": 0.00281,
+          "positive_rows": 117,
+          "rows": 276889,
+          "val_years": "1994-1999",
+          "failing_banks": 44
+        },
+        {
+          "pr_auc": 0.0621,
+          "roc_auc": 0.8954,
+          "recall_top_1pct": 0.5036,
+          "recall_top_5pct": 0.6978,
+          "brier_score": 0.0022,
+          "positive_rows": 139,
+          "rows": 297905,
+          "val_years": "2000-2007",
+          "failing_banks": 59
         }
       ]
     }
   },
   "cost_threshold_tuning": {
-    "median_dif_cost_kusd": 9814.7,
+    "resolution_loss_rate": 0.1961,
     "false_alarm_cost_kusd": 250.0,
-    "optimal_threshold": 0.399,
-    "min_expected_cost_dev": 7070178.67
+    "theta": 0.01,
+    "expected_cost_dev_kusd": 61409231.0,
+    "dev_banks_missed_at_theta": 11,
+    "dev_failing_banks": 1522,
+    "sensitivity": {
+      "100": {
+        "theta": 0.01,
+        "dev_banks_missed": 11,
+        "dev_false_alarm_rows": 229536
+      },
+      "250": {
+        "theta": 0.01,
+        "dev_banks_missed": 11,
+        "dev_false_alarm_rows": 229536
+      },
+      "500": {
+        "theta": 0.01,
+        "dev_banks_missed": 11,
+        "dev_false_alarm_rows": 229536
+      },
+      "1000": {
+        "theta": 0.01,
+        "dev_banks_missed": 11,
+        "dev_false_alarm_rows": 229536
+      }
+    }
   },
   "held_out_test_evaluation": {
-    "pr_auc": 0.6721,
-    "roc_auc": 0.987,
-    "recall_top_1pct": 0.8509,
-    "recall_top_5pct": 0.9595,
-    "brier_score": 0.01637,
-    "total_failures": 1777,
-    "sample_size": 400698,
-    "baseline_texas_test": {
-      "pr_auc": 0.2567,
-      "roc_auc": 0.9504,
-      "recall_top_1pct": 0.6691,
-      "recall_top_5pct": 0.9122,
-      "brier_score": 0.15657,
-      "total_failures": 1777,
-      "sample_size": 400698
+    "pr_auc": 0.5541,
+    "roc_auc": 0.9845,
+    "recall_top_1pct": 0.8275,
+    "recall_top_5pct": 0.9546,
+    "brier_score": 0.01583,
+    "positive_rows": 1409,
+    "rows": 400332,
+    "texas_rule": {
+      "pr_auc": 0.1507,
+      "roc_auc": 0.9629,
+      "recall_top_1pct": 0.5877,
+      "recall_top_5pct": 0.9163,
+      "brier_score": 0.00625,
+      "positive_rows": 1409,
+      "rows": 400332
     },
-    "optimal_threshold": 0.399,
-    "confusion_matrix_at_opt_threshold": {
-      "true_negatives": 389212,
-      "false_positives": 9709,
-      "false_negatives": 82,
-      "true_positives": 1695,
-      "precision": 0.1486,
-      "recall": 0.9539
+    "threshold": 0.01,
+    "at_threshold": {
+      "failing_banks": 485,
+      "failing_banks_caught": 483,
+      "bank_recall": 0.9959,
+      "median_lead_days": 302.0,
+      "false_alarm_rows": 221225,
+      "flagged_share_of_rows_pct": 55.61,
+      "positive_rows_flagged": 1400
     },
-    "subperiod_gfc_2009_2014": {
-      "pr_auc": 0.7057,
-      "roc_auc": 0.9903,
-      "recall_top_1pct": 0.679,
-      "recall_top_5pct": 0.9703,
-      "brier_score": 0.02667,
-      "total_failures": 1648,
-      "sample_size": 178266
+    "sensitivity_to_false_alarm_cost": {
+      "100": {
+        "theta": 0.01,
+        "dev_banks_missed": 11,
+        "dev_false_alarm_rows": 229536,
+        "bank_recall": 0.9959,
+        "false_alarm_rows": 221225,
+        "flagged_share_of_rows_pct": 55.61
+      },
+      "250": {
+        "theta": 0.01,
+        "dev_banks_missed": 11,
+        "dev_false_alarm_rows": 229536,
+        "bank_recall": 0.9959,
+        "false_alarm_rows": 221225,
+        "flagged_share_of_rows_pct": 55.61
+      },
+      "500": {
+        "theta": 0.01,
+        "dev_banks_missed": 11,
+        "dev_false_alarm_rows": 229536,
+        "bank_recall": 0.9959,
+        "false_alarm_rows": 221225,
+        "flagged_share_of_rows_pct": 55.61
+      },
+      "1000": {
+        "theta": 0.01,
+        "dev_banks_missed": 11,
+        "dev_false_alarm_rows": 229536,
+        "bank_recall": 0.9959,
+        "false_alarm_rows": 221225,
+        "flagged_share_of_rows_pct": 55.61
+      }
     },
-    "subperiod_modern_2015_2025": {
-      "pr_auc": 0.2984,
-      "roc_auc": 0.9195,
-      "recall_top_1pct": 0.7209,
-      "recall_top_5pct": 0.7287,
-      "brier_score": 0.00812,
-      "total_failures": 129,
-      "sample_size": 222432
-    }
+    "gfc_2009_2014": {
+      "pr_auc": 0.5891,
+      "roc_auc": 0.988,
+      "recall_top_1pct": 0.6708,
+      "recall_top_5pct": 0.9601,
+      "brier_score": 0.02849,
+      "positive_rows": 1303,
+      "rows": 177923,
+      "failing_banks": 453
+    },
+    "modern_2015_2025": {
+      "pr_auc": 0.1741,
+      "roc_auc": 0.9086,
+      "recall_top_1pct": 0.6698,
+      "recall_top_5pct": 0.7264,
+      "brier_score": 0.0057,
+      "positive_rows": 106,
+      "rows": 222409,
+      "failing_banks": 35
+    },
+    "failing_banks_total": 485,
+    "dev_failing_banks_total": 2661
   }
 }
