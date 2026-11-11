@@ -1,8 +1,7 @@
-"""Time-ordered validation, leak-free pipeline, cost-sensitive thresholding, and modeling (Part 5)."""
+"""Leak-free validation, bank-level cost-based alarm threshold, and the single held-out test (Part 5)."""
 from __future__ import annotations
 
 import gc
-import json
 from pathlib import Path
 from typing import Any
 
@@ -12,329 +11,260 @@ from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (
-    average_precision_score,
-    brier_score_loss,
-    confusion_matrix,
-    precision_recall_curve,
-    roc_auc_score,
-)
+from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from .core import texas_cap
 from .features import FEATURE_COLS_CAMELS
+from .io import parse_failures
 from .utils import cfg, data_dir, get_logger, out_dir, save_json
 
 log = get_logger("modeling")
+SEED = 42
 
 
 class RobustWinsorizer(BaseEstimator, TransformerMixin):
-    """Winsorize numerical columns at empirical quantiles fitted strictly on training data."""
+    """Clip each column at training-set quantiles and drop columns that carry no information in the training set.
+
+    Everything is learned in `fit` (training data only). Columns with fewer than two distinct observed values in
+    the training data (for example the Basel ratios, which do not exist before 1990, in an early fold) are dropped
+    in `transform`, so no dummy values have to be invented.
+    """
 
     def __init__(self, lower_quantile: float = 0.01, upper_quantile: float = 0.99):
         self.lower_quantile = lower_quantile
         self.upper_quantile = upper_quantile
-        self.lower_bounds_: np.ndarray | None = None
-        self.upper_bounds_: np.ndarray | None = None
 
     def fit(self, X, y=None):
-        X_arr = np.asarray(X, dtype=np.float32)
-        X_clean = np.where(np.isfinite(X_arr), X_arr, np.nan)
-        n_cols = X_clean.shape[1]
-        self.lower_bounds_ = np.zeros(n_cols, dtype=np.float32)
-        self.upper_bounds_ = np.zeros(n_cols, dtype=np.float32)
-        self.all_nan_cols_ = np.zeros(n_cols, dtype=bool)
-        for j in range(n_cols):
-            col = X_clean[:, j]
-            valid = col[~np.isnan(col)]
-            if len(valid) == 0:
-                self.all_nan_cols_[j] = True
-                self.lower_bounds_[j] = 0.0
-                self.upper_bounds_[j] = 0.0
-            else:
-                self.lower_bounds_[j] = float(np.quantile(valid, self.lower_quantile))
-                self.upper_bounds_[j] = float(np.quantile(valid, self.upper_quantile))
+        X = np.where(np.isfinite(np.asarray(X, dtype=np.float32)), np.asarray(X, dtype=np.float32), np.nan)
+        n = X.shape[1]
+        self.keep_ = np.zeros(n, dtype=bool)
+        self.lo_ = np.full(n, np.nan, dtype=np.float32)
+        self.hi_ = np.full(n, np.nan, dtype=np.float32)
+        for j in range(n):
+            col = X[:, j]
+            col = col[~np.isnan(col)]
+            if len(col) and np.unique(col).size >= 2:
+                self.keep_[j] = True
+                self.lo_[j], self.hi_[j] = np.quantile(col, [self.lower_quantile, self.upper_quantile])
         return self
 
     def transform(self, X):
-        X_arr = np.asarray(X, dtype=np.float32).copy()
-        X_arr = np.where(np.isfinite(X_arr), X_arr, np.nan)
-        if self.lower_bounds_ is not None and self.upper_bounds_ is not None:
-            for col_idx in range(X_arr.shape[1]):
-                if self.all_nan_cols_[col_idx]:
-                    # Fill pre-Basel completely unobserved column with 0 (and tiny deterministic tie-breaker at row 0)
-                    X_arr[:, col_idx] = 0.0
-                    if X_arr.shape[0] > 1:
-                        X_arr[0, col_idx] = 1e-6
-                else:
-                    lb = self.lower_bounds_[col_idx]
-                    ub = self.upper_bounds_[col_idx]
-                    np.clip(X_arr[:, col_idx], lb, ub, out=X_arr[:, col_idx])
-        return X_arr
+        X = np.asarray(X, dtype=np.float32)
+        X = np.where(np.isfinite(X), X, np.nan)[:, self.keep_]
+        return np.clip(X, self.lo_[self.keep_], self.hi_[self.keep_])  # NaN stays NaN (imputed or handled by the model)
 
 
 class TexasRatioBaseline(BaseEstimator, ClassifierMixin):
-    """Rule-based supervisory baseline: ranks institutions purely by the Texas Ratio."""
+    """Supervisory rule: rank banks by the (capped) Texas ratio. Nothing is fitted."""
 
     def fit(self, X, y=None):
         self.classes_ = np.array([0, 1])
         return self
 
     def predict_proba(self, X):
-        X_arr = np.asarray(X, dtype=np.float32)
-        texas = np.nan_to_num(X_arr[:, 0], nan=0.0, posinf=10.0, neginf=0.0)
-        texas = np.clip(texas, -20.0, 20.0)
-        prob = 1.0 / (1.0 + np.exp(-0.5 * (texas - 1.0)))
-        return np.column_stack([1.0 - prob, prob])
+        t = np.nan_to_num(np.asarray(X, dtype=np.float32)[:, 0], nan=0.0)
+        p = np.clip(t / texas_cap(), 0.0, 1.0)
+        return np.column_stack([1.0 - p, p])
 
 
-def evaluate_predictions(y_true: np.ndarray, y_prob: np.ndarray) -> dict[str, float]:
-    """Compute metrics appropriate for extreme class imbalance in banking supervision."""
-    roc_auc = float(roc_auc_score(y_true, y_prob)) if len(np.unique(y_true)) > 1 else 0.5
-    pr_auc = float(average_precision_score(y_true, y_prob)) if len(np.unique(y_true)) > 1 else 0.0
-    brier = float(brier_score_loss(y_true, y_prob))
-
-    n = len(y_prob)
-    total_positives = int(np.sum(y_true))
-    order = np.argsort(y_prob)[::-1]
-
-    top1_idx = order[: max(1, int(n * 0.01))]
-    top5_idx = order[: max(1, int(n * 0.05))]
-
-    recall_at_1pct = float(np.sum(y_true[top1_idx]) / max(1, total_positives))
-    recall_at_5pct = float(np.sum(y_true[top5_idx]) / max(1, total_positives))
-
-    return {
-        "pr_auc": round(pr_auc, 4),
-        "roc_auc": round(roc_auc, 4),
-        "recall_top_1pct": round(recall_at_1pct, 4),
-        "recall_top_5pct": round(recall_at_5pct, 4),
-        "brier_score": round(brier, 5),
-        "total_failures": total_positives,
-        "sample_size": n,
-    }
+def make_model(kind: str):
+    if kind == "texas":
+        return Pipeline([("model", TexasRatioBaseline())])
+    if kind == "logit":
+        return Pipeline([("winsor", RobustWinsorizer()), ("impute", SimpleImputer(strategy="median", add_indicator=True)),
+                         ("scale", StandardScaler()),
+                         ("model", LogisticRegression(class_weight="balanced", C=0.1, max_iter=300, random_state=SEED))])
+    return Pipeline([("winsor", RobustWinsorizer()),
+                     ("model", HistGradientBoostingClassifier(max_iter=120, max_depth=5, learning_rate=0.05,
+                                                              min_samples_leaf=50, class_weight="balanced",
+                                                              random_state=SEED))])
 
 
-def find_cost_optimal_threshold(
-    y_true: np.ndarray,
-    y_prob: np.ndarray,
-    cost_fn: float,
-    cost_fp: float,
-) -> tuple[float, float]:
-    """Determine probability alarm threshold theta* minimizing expected supervisory cost.
+def evaluate_predictions(y: np.ndarray, p: np.ndarray) -> dict[str, float]:
+    """Row-level metrics for rare events: PR-AUC (main), ROC-AUC, recall in the top 1% / 5% of scores, Brier."""
+    both = len(np.unique(y)) > 1
+    order = np.argsort(-p, kind="stable")
+    n, pos = len(p), int(y.sum())
+    top = lambda q: float(y[order[: max(1, int(n * q))]].sum() / max(1, pos))  # noqa: E731
+    return {"pr_auc": round(float(average_precision_score(y, p)) if both else 0.0, 4),
+            "roc_auc": round(float(roc_auc_score(y, p)) if both else 0.5, 4),
+            "recall_top_1pct": round(top(0.01), 4), "recall_top_5pct": round(top(0.05), 4),
+            "brier_score": round(float(brier_score_loss(y, p)), 5),
+            "positive_rows": pos, "rows": n}
 
-    Expected Cost = cost_fn * FN(theta) + cost_fp * FP(theta).
-    Vectorized over sorted probabilities for speed and zero memory overhead.
+
+# ------------------------------------------------------------------------------------------------------------------
+# Bank-level cost model
+# ------------------------------------------------------------------------------------------------------------------
+def resolution_loss_rate() -> float:
+    """Median FDIC resolution loss as a share of the failed bank's assets, from development-period failures only.
+
+    Using COST / QBFASSET (both in thousand USD) removes inflation and bank size, so it can be applied to any bank.
     """
-    cand_thetas = np.linspace(0.01, 0.99, 200)
-    pos_mask = y_true == 1
-    neg_mask = ~pos_mask
-    total_pos = int(np.sum(pos_mask))
-
-    best_theta = 0.5
-    min_cost = float("inf")
-
-    for theta in cand_thetas:
-        tp = int(np.sum(y_prob[pos_mask] >= theta))
-        fp = int(np.sum(y_prob[neg_mask] >= theta))
-        fn = total_pos - tp
-        cost = (cost_fn * fn) + (cost_fp * fp)
-        if cost < min_cost:
-            min_cost = float(cost)
-            best_theta = float(theta)
-
-    return best_theta, min_cost
+    dev_end = cfg()["split"]["dev_end"]
+    f = (parse_failures().filter(pl.col("FAILDATE") <= pl.lit(dev_end).str.to_date("%Y-%m-%d"))
+         .filter((pl.col("COST") > 0) & (pl.col("QBFASSET") > 0)))
+    return float((f["COST"] / f["QBFASSET"]).median())
 
 
-def run_walk_forward_cv(
-    dev_df: pl.DataFrame,
-    features: list[str],
-    model_name: str = "HistGradientBoosting",
-) -> tuple[list[dict], np.ndarray, np.ndarray]:
-    """Execute expanding-window walk-forward validation inside the Dev set.
+class BankCostModel:
+    """Expected cost of an alarm rule 'flag a bank-quarter if p >= theta'.
 
-    For each validation block, training is restricted to observations whose 4Q forward label
-    was fully realized prior to the start of the validation period (4Q purge buffer).
+    * false alarm  : every flagged bank-quarter with y = 0 costs `fp_cost` (one targeted examination);
+    * missed failure: a failing bank is caught if ANY of its positive rows (the 4 quarters before failure) is
+      flagged; otherwise it costs `loss_rate x assets` (assets at its first positive row), one cost per BANK,
+      not per row.
     """
-    blocks = cfg()["split"]["cv_blocks"]
 
-    cv_results = []
-    oof_y_true = []
-    oof_y_prob = []
+    def __init__(self, cert, y, p, assets, loss_rate: float):
+        pos = y == 1
+        self.neg_sorted = np.sort(p[~pos])
+        d = (pl.DataFrame({"cert": cert[pos], "p": p[pos], "a": assets[pos]})
+             .group_by("cert", maintain_order=True).agg(pl.col("p").max().alias("pmax"), pl.col("a").first()))
+        self.bank_pmax = d["pmax"].to_numpy()
+        self.bank_cost = d["a"].to_numpy() * loss_rate
+        self.n_banks = len(self.bank_pmax)
 
-    years = dev_df["REPDTE"].dt.year()
+    def fp(self, theta: float) -> int:
+        return int(len(self.neg_sorted) - np.searchsorted(self.neg_sorted, theta, side="left"))
 
-    for start_yr, end_yr in blocks:
-        val_sub = dev_df.filter((years >= start_yr) & (years <= end_yr))
-        train_sub = dev_df.filter(years < (start_yr - 1))
+    def missed(self, theta: float) -> tuple[int, float]:
+        miss = self.bank_pmax < theta
+        return int(miss.sum()), float(self.bank_cost[miss].sum())
 
-        if train_sub.height < 5000 or val_sub.height == 0:
+    def total_cost(self, theta: float, fp_cost: float) -> float:
+        return self.fp(theta) * fp_cost + self.missed(theta)[1]
+
+    def best_theta(self, fp_cost: float, grid=None) -> tuple[float, float]:
+        grid = np.linspace(0.01, 0.99, 197) if grid is None else grid
+        costs = [self.total_cost(t, fp_cost) for t in grid]
+        i = int(np.argmin(costs))
+        return float(grid[i]), float(costs[i])
+
+
+# ------------------------------------------------------------------------------------------------------------------
+def load_modeling_frame(gold_path: Path | None = None) -> pl.DataFrame:
+    """DEV and TEST rows that could have been scored in real time (pit_scorable), features as Float32."""
+    gold_path = gold_path or data_dir("gold") / "features.parquet"
+    cols = ["CERT", "REPDTE", "split_group", "target_fail_4q", "pit_scorable", "ASSET", "FAILDATE"] + FEATURE_COLS_CAMELS
+    return (pl.scan_parquet(gold_path)
+            .filter(pl.col("split_group").is_in(["DEV", "TEST"]) & pl.col("pit_scorable"))
+            .select(cols)
+            .with_columns([pl.col(c).cast(pl.Float32) for c in FEATURE_COLS_CAMELS])
+            .collect())
+
+
+def run_walk_forward_cv(dev: pl.DataFrame, features: list[str], kind: str):
+    """Expanding-window validation in the development period.
+
+    For a validation block starting in year Y the model is trained on quarters dated before Y-1; one year is purged
+    so that no training label window (4 quarters ahead) reaches into the validation block.
+    """
+    year = dev["REPDTE"].dt.year()
+    folds, oof = [], {"cert": [], "y": [], "p": [], "asset": []}
+    for y0, y1 in cfg()["split"]["cv_blocks"]:
+        tr, va = dev.filter(year < y0 - 1), dev.filter((year >= y0) & (year <= y1))
+        if tr.height < 5000 or va.height == 0:
             continue
-
-        X_train = train_sub.select(features).to_numpy()
-        y_train = train_sub["target_fail_4q"].to_numpy()
-
-        X_val = val_sub.select(features).to_numpy()
-        y_val = val_sub["target_fail_4q"].to_numpy()
-
-        if model_name == "LogisticRegression":
-            clf = Pipeline([
-                ("winsorizer", RobustWinsorizer()),
-                ("imputer", SimpleImputer(strategy="median", add_indicator=True)),
-                ("scaler", StandardScaler()),
-                ("model", LogisticRegression(class_weight="balanced", max_iter=300, C=0.1, random_state=42)),
-            ])
-        elif model_name == "TexasRatio":
-            clf = Pipeline([
-                ("model", TexasRatioBaseline()),
-            ])
-        else:
-            clf = Pipeline([
-                ("winsorizer", RobustWinsorizer()),
-                ("model", HistGradientBoostingClassifier(
-                    max_iter=120,
-                    max_depth=5,
-                    learning_rate=0.05,
-                    class_weight="balanced",
-                    random_state=42,
-                    min_samples_leaf=50,
-                )),
-            ])
-
-        clf.fit(X_train, y_train)
-        probs = clf.predict_proba(X_val)[:, 1]
-
-        metrics = evaluate_predictions(y_val, probs)
-        metrics["val_years"] = f"{start_yr}-{end_yr}"
-        cv_results.append(metrics)
-
-        oof_y_true.extend(y_val.tolist())
-        oof_y_prob.extend(probs.tolist())
-
-        del X_train, y_train, X_val, y_val, clf
+        model = make_model(kind).fit(tr.select(features).to_numpy(), tr["target_fail_4q"].to_numpy())
+        p = model.predict_proba(va.select(features).to_numpy())[:, 1]
+        y = va["target_fail_4q"].to_numpy()
+        folds.append({**evaluate_predictions(y, p), "val_years": f"{y0}-{y1}",
+                      "failing_banks": int(va.filter(pl.col("target_fail_4q") == 1)["CERT"].n_unique())})
+        oof["cert"].append(va["CERT"].to_numpy()); oof["y"].append(y); oof["p"].append(p); oof["asset"].append(va["ASSET"].to_numpy())
+        del tr, va, model
         gc.collect()
+    return folds, {k: np.concatenate(v) for k, v in oof.items()}
 
-    return cv_results, np.array(oof_y_true), np.array(oof_y_prob)
+
+def bank_level_test_summary(test: pl.DataFrame, p: np.ndarray, theta: float) -> dict[str, Any]:
+    """Which failing banks were flagged at least once in their 4 pre-failure quarters, and how early."""
+    d = test.select("CERT", "REPDTE", "FAILDATE", "target_fail_4q").with_columns(pl.Series("p", p))
+    pos = d.filter(pl.col("target_fail_4q") == 1)
+    per_bank = (pos.group_by("CERT")
+                .agg(pl.col("FAILDATE").first(),
+                     (pl.col("p") >= theta).any().alias("caught"),
+                     pl.col("REPDTE").filter(pl.col("p") >= theta).min().alias("first_alarm")))
+    caught = per_bank.filter(pl.col("caught"))
+    lead = (caught["FAILDATE"] - caught["first_alarm"]).dt.total_days()
+    flagged_neg = int(((d["p"] >= theta) & (d["target_fail_4q"] == 0)).sum())
+    return {"failing_banks": per_bank.height, "failing_banks_caught": caught.height,
+            "bank_recall": round(caught.height / max(1, per_bank.height), 4),
+            "median_lead_days": float(lead.median()) if len(lead) else None,
+            "false_alarm_rows": flagged_neg, "flagged_share_of_rows_pct": round(float((d["p"] >= theta).mean()) * 100, 3),
+            "positive_rows_flagged": int(((d["p"] >= theta) & (d["target_fail_4q"] == 1)).sum())}
 
 
 def execute_full_modeling_workflow(gold_path: Path | None = None) -> dict[str, Any]:
-    """Execute complete modeling, cross-validation, cost threshold tuning, and held-out test evaluation."""
-    if gold_path is None:
-        gold_path = data_dir("gold") / "features.parquet"
-
-    log.info("Scanning Gold feature table (projection pushdown + Float32 cast)...")
-    needed_cols = ["CERT", "REPDTE", "split_group", "target_fail_4q", "COST"] + FEATURE_COLS_CAMELS
-    df = (
-        pl.scan_parquet(gold_path)
-        .filter(pl.col("split_group").is_in(["DEV", "TEST"]))
-        .select(needed_cols)
-        .with_columns([pl.col(c).cast(pl.Float32) for c in FEATURE_COLS_CAMELS])
-        .collect()
-    )
-
-    dev_df = df.filter(pl.col("split_group") == "DEV").sort("REPDTE")
-    test_df = df.filter(pl.col("split_group") == "TEST").sort("REPDTE")
+    df = load_modeling_frame(gold_path)
+    dev = df.filter(pl.col("split_group") == "DEV").sort("REPDTE")
+    test = df.filter(pl.col("split_group") == "TEST").sort("REPDTE")
     del df
     gc.collect()
+    log.info(f"DEV rows {dev.height:,} | TEST rows {test.height:,} (pit_scorable only)")
 
-    # 1. Compare models on Walk-Forward CV
-    models = {
-        "Texas_Ratio_Baseline": ["texas_ratio"],
-        "Logistic_3Var_Baseline": ["eq_asset_ratio", "nclnls_ratio", "roa_q"],
-        "Logistic_Regression_CAMELS": FEATURE_COLS_CAMELS,
-        "Hist_Gradient_Boosting": FEATURE_COLS_CAMELS,
+    candidates = {
+        "Texas ratio rule": (["texas_ratio"], "texas"),
+        "Logistic, 3 variables": (["eq_asset_ratio", "nclnls_ratio", "roa_ytd"], "logit"),
+        "Logistic, 26 CAMELS": (FEATURE_COLS_CAMELS, "logit"),
+        "HistGradientBoosting, 26 CAMELS": (FEATURE_COLS_CAMELS, "hgb"),
     }
+    cv, champion_oof = {}, None
+    for name, (feats, kind) in candidates.items():
+        log.info(f"Walk-forward CV: {name}")
+        folds, oof = run_walk_forward_cv(dev, feats, kind)
+        cv[name] = {**evaluate_predictions(oof["y"], oof["p"]), "folds": folds}
+        if name == "HistGradientBoosting, 26 CAMELS":
+            champion_oof = oof
 
-    cv_summary = {}
-    best_oof_y_true = None
-    best_oof_y_prob = None
+    # ---- cost-based alarm threshold, decided on development out-of-fold predictions only -------------------------
+    loss_rate = resolution_loss_rate()
+    cm = BankCostModel(champion_oof["cert"], champion_oof["y"], champion_oof["p"], champion_oof["asset"], loss_rate)
+    fp_cost = float(cfg()["cost"]["false_alarm_cost_kusd"])
+    theta, dev_cost = cm.best_theta(fp_cost)
+    miss_n, _ = cm.missed(theta)
+    sens = {}
+    for c in cfg()["cost"]["sensitivity_false_alarm_kusd"]:
+        t, _ = cm.best_theta(float(c))
+        sens[str(c)] = {"theta": round(t, 3), "dev_banks_missed": cm.missed(t)[0], "dev_false_alarm_rows": cm.fp(t)}
+    log.info(f"loss rate {loss_rate:.3f}; theta* = {theta:.3f} (C_FP = {fp_cost:,.0f}k USD)")
 
-    for m_label, feat_list in models.items():
-        log.info(f"Running walk-forward CV for {m_label}...")
-        m_type = "LogisticRegression" if "Logistic" in m_label else ("TexasRatio" if "Texas" in m_label else "HistGradientBoosting")
-        fold_res, oof_y, oof_p = run_walk_forward_cv(dev_df, feat_list, model_name=m_type)
-        overall_metrics = evaluate_predictions(oof_y, oof_p)
-        overall_metrics["fold_details"] = fold_res
-        cv_summary[m_label] = overall_metrics
+    # ---- the one and only evaluation on the test period ------------------------------------------------------------
+    log.info("Fitting the champion on all DEV rows and scoring TEST once...")
+    feats = FEATURE_COLS_CAMELS
+    champion = make_model("hgb").fit(dev.select(feats).to_numpy(), dev["target_fail_4q"].to_numpy())
+    p_test = champion.predict_proba(test.select(feats).to_numpy())[:, 1]
+    y_test = test["target_fail_4q"].to_numpy()
+    p_texas = make_model("texas").fit(dev.select(["texas_ratio"]).to_numpy(), dev["target_fail_4q"].to_numpy()).predict_proba(test.select(["texas_ratio"]).to_numpy())[:, 1]
 
-        if m_label == "Hist_Gradient_Boosting":
-            best_oof_y_true = oof_y
-            best_oof_y_prob = oof_p
-
-    # 2. Derive Cost-Optimal Alarm Threshold from Dev DIF losses
-    dev_failures = dev_df.filter(pl.col("target_fail_4q") == 1)
-    median_dif_cost = float(dev_failures.select(pl.col("COST").drop_nulls().median()).item() or 35_000)
-    fp_exam_cost = float(cfg()["cost"]["false_alarm_cost_kusd"])
-
-    log.info(f"Dev Failure Median DIF Loss (C_FN): ${median_dif_cost:,.0f}k | Exam Cost (C_FP): ${fp_exam_cost:,.0f}k")
-    opt_threshold, min_dev_cost = find_cost_optimal_threshold(
-        best_oof_y_true, best_oof_y_prob, cost_fn=median_dif_cost, cost_fp=fp_exam_cost
-    )
-    log.info(f"Optimal Supervisory Alarm Threshold theta*: {opt_threshold:.4f}")
-
-    # 3. SINGLE HELD-OUT TEST EVALUATION (Part 5 requirement)
-    log.info("Evaluating Champion Model (HistGradientBoosting) ONCE on held-out TEST set (2009-2025)...")
-    X_dev = dev_df.select(FEATURE_COLS_CAMELS).to_numpy()
-    y_dev = dev_df["target_fail_4q"].to_numpy()
-    X_test = test_df.select(FEATURE_COLS_CAMELS).to_numpy()
-    y_test = test_df["target_fail_4q"].to_numpy()
-
-    champion_pipeline = Pipeline([
-        ("winsorizer", RobustWinsorizer()),
-        ("model", HistGradientBoostingClassifier(
-            max_iter=120,
-            max_depth=5,
-            learning_rate=0.05,
-            class_weight="balanced",
-            random_state=42,
-            min_samples_leaf=50,
-        )),
-    ])
-
-    champion_pipeline.fit(X_dev, y_dev)
-    test_probs = champion_pipeline.predict_proba(X_test)[:, 1]
-
-    # Also evaluate Texas Ratio baseline on test set for reference
-    texas_test_probs = TexasRatioBaseline().predict_proba(test_df.select(["texas_ratio"]).to_numpy())[:, 1]
-    texas_test_metrics = evaluate_predictions(y_test, texas_test_probs)
-
-    # Metrics on full test set
-    test_metrics = evaluate_predictions(y_test, test_probs)
-    test_metrics["baseline_texas_test"] = texas_test_metrics
-
-    # Confusion matrix at optimal threshold
-    y_pred_opt = (test_probs >= opt_threshold).astype(int)
-    tn, fp, fn, tp = confusion_matrix(y_test, y_pred_opt, labels=[0, 1]).ravel()
-    test_metrics["optimal_threshold"] = round(opt_threshold, 4)
-    test_metrics["confusion_matrix_at_opt_threshold"] = {
-        "true_negatives": int(tn),
-        "false_positives": int(fp),
-        "false_negatives": int(fn),
-        "true_positives": int(tp),
-        "precision": round(float(tp / max(1, tp + fp)), 4),
-        "recall": round(float(tp / max(1, tp + fn)), 4),
+    years = test["REPDTE"].dt.year().to_numpy()
+    gfc, modern = (years <= 2014), (years >= 2015)
+    test_eval = {
+        **evaluate_predictions(y_test, p_test),
+        "texas_rule": evaluate_predictions(y_test, p_texas),
+        "threshold": round(theta, 4),
+        "at_threshold": bank_level_test_summary(test, p_test, theta),
+        "sensitivity_to_false_alarm_cost": {
+            c: {**v, **{k: bank_level_test_summary(test, p_test, v["theta"])[k]
+                        for k in ("bank_recall", "false_alarm_rows", "flagged_share_of_rows_pct")}}
+            for c, v in sens.items()},
+        "gfc_2009_2014": {**evaluate_predictions(y_test[gfc], p_test[gfc]),
+                          "failing_banks": int(test.filter(pl.col("target_fail_4q") == 1).filter(pl.col("REPDTE").dt.year() <= 2014)["CERT"].n_unique())},
+        "modern_2015_2025": {**evaluate_predictions(y_test[modern], p_test[modern]),
+                             "failing_banks": int(test.filter(pl.col("target_fail_4q") == 1).filter(pl.col("REPDTE").dt.year() >= 2015)["CERT"].n_unique())},
+        "failing_banks_total": int(test.filter(pl.col("target_fail_4q") == 1)["CERT"].n_unique()),
+        "dev_failing_banks_total": int(dev.filter(pl.col("target_fail_4q") == 1)["CERT"].n_unique()),
     }
-
-    # Breakdown by crisis regime in test period
-    test_years = test_df["REPDTE"].dt.year().to_numpy()
-    gfc_mask = (test_years >= 2009) & (test_years <= 2014)
-    modern_mask = (test_years >= 2015) & (test_years <= 2025)
-
-    test_metrics["subperiod_gfc_2009_2014"] = evaluate_predictions(y_test[gfc_mask], test_probs[gfc_mask])
-    test_metrics["subperiod_modern_2015_2025"] = evaluate_predictions(y_test[modern_mask], test_probs[modern_mask])
-
     results = {
-        "cross_validation_models": cv_summary,
-        "cost_threshold_tuning": {
-            "median_dif_cost_kusd": round(median_dif_cost, 2),
-            "false_alarm_cost_kusd": fp_exam_cost,
-            "optimal_threshold": round(opt_threshold, 4),
-            "min_expected_cost_dev": round(min_dev_cost, 2),
-        },
-        "held_out_test_evaluation": test_metrics,
+        "cross_validation_models": cv,
+        "cost_threshold_tuning": {"resolution_loss_rate": round(loss_rate, 4), "false_alarm_cost_kusd": fp_cost,
+                                  "theta": round(theta, 4), "expected_cost_dev_kusd": round(dev_cost, 0),
+                                  "dev_banks_missed_at_theta": miss_n, "dev_failing_banks": cm.n_banks,
+                                  "sensitivity": sens},
+        "held_out_test_evaluation": test_eval,
     }
-
-    out_json = out_dir("tables") / "test_results.json"
-    save_json(results, out_json)
-    log.info(f"Saved modeling test results to {out_json}")
+    save_json(results, out_dir("tables") / "test_results.json")
+    log.info("Saved outputs/tables/test_results.json")
     return results

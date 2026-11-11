@@ -1,166 +1,108 @@
-"""CAMELS + Texas Ratio + Dynamics Feature Engineering in Polars (Part 4)."""
+"""CAMELS + Texas ratio + 4-quarter dynamics, computed point-in-time in Polars (Part 4)."""
 from __future__ import annotations
 
-from pathlib import Path
-
-import numpy as np
 import polars as pl
 
+from .core import add_time_keys, lag4_ok, texas_expr
 from .utils import data_dir, get_logger
 
 log = get_logger("features")
 
-# Definitions of feature column groups for downstream modeling pipelines
 FEATURE_COLS_CAMELS = [
-    # Capital Adequacy
-    "eq_asset_ratio",
-    "rbc1aaj_clean",
-    "rbcrwaj_clean",
-    "cap_distress_flag",
-    # Asset Quality
-    "nclnls_ratio",
-    "naasset_ratio",
-    "ore_ratio",
-    "lnatres_ratio",
-    "texas_ratio",
-    # Management Efficiency
+    # Capital adequacy
+    "eq_asset_ratio", "rbc1aaj_clean", "rbcrwaj_clean", "cap_distress_flag",
+    # Asset quality
+    "nclnls_ratio", "naasset_ratio", "ore_ratio", "lnatres_ratio", "texas_ratio",
+    # Management / efficiency
     "efficiency_ratio",
-    # Earnings & Profitability
-    "roa_q",
-    "nimy_clean",
-    "provision_asset_ratio",
-    "netinc_q_asset_ratio",
-    # Liquidity & Funding
-    "liquid_asset_ratio",
-    "brokered_dep_ratio",
-    "loan_to_deposit_ratio",
-    # Sensitivity & Loan Concentration
-    "re_loan_share",
-    "ci_loan_share",
-    "con_loan_share",
-    # Size & Dynamics (Lags strictly from past quarters)
-    "log_asset",
-    "asset_growth_4q",
-    "loan_growth_4q",
-    "d4_texas_ratio",
-    "d4_nclnls_ratio",
-    "d4_eq_ratio",
+    # Earnings
+    "roa_ytd", "nimy_clean", "provision_asset_ratio", "netinc_q_asset_ratio",
+    # Liquidity & funding
+    "liquid_asset_ratio", "brokered_dep_ratio", "loan_to_deposit_ratio",
+    # Sensitivity / loan concentration
+    "re_loan_share", "ci_loan_share", "con_loan_share",
+    # Size and dynamics (lags only look backwards, and only across exactly 4 quarters)
+    "log_asset", "asset_growth_4q", "loan_growth_4q", "d4_texas_ratio", "d4_nclnls_ratio", "d4_eq_ratio",
 ]
 
 
+def safe_div(num: pl.Expr, den: pl.Expr) -> pl.Expr:
+    """num / den, or null when the denominator is not positive (imputed later, on training data only)."""
+    return pl.when(den > 0).then(num / den).otherwise(None)
+
+
 def compute_camels_features(df: pl.DataFrame) -> pl.DataFrame:
-    """Compute CAMELS and Texas Ratio features on the silver panel.
+    """All features use data dated <= REPDTE of the same bank. No future information is used."""
+    log.info("Computing CAMELS ratios and Texas ratio...")
+    df = add_time_keys(df)
+    pre_basel = pl.col("year") < 1990
+    asset, loans, dep = pl.col("ASSET"), pl.col("LNLSGR"), pl.col("DEP")
 
-    All feature calculations are strictly point-in-time and use data available at or before
-    the reporting date (t <= REPDTE). No future information is utilized.
-    """
-    log.info("Computing CAMELS ratios and Texas ratios...")
-
-    # Safe denominator epsilon to avoid division by zero
-    eps = 1e-4
-
-    df = df.with_columns([
-        # Capital Adequacy
-        (pl.col("EQ") / (pl.col("ASSET") + eps)).alias("eq_asset_ratio"),
-        # Regulatory capital: pre-1990 Basel zero is treated as unobserved/null
-        (
-            pl.when((pl.col("REPDTE").dt.year() < 1990) & (pl.col("RBC1AAJ") == 0))
-            .then(None)
-            .otherwise(pl.col("RBC1AAJ"))
-        ).alias("rbc1aaj_clean"),
-        (
-            pl.when((pl.col("REPDTE").dt.year() < 1990) & (pl.col("RBCRWAJ") == 0))
-            .then(None)
-            .otherwise(pl.col("RBCRWAJ"))
-        ).alias("rbcrwaj_clean"),
-        # Severe capital distress indicator (Equity < 2% of Assets or negative equity)
-        (
-            (pl.col("EQ") < 0) | ((pl.col("EQ") / (pl.col("ASSET") + eps)) < 0.02)
-        ).cast(pl.Float64).alias("cap_distress_flag"),
-
-        # Asset Quality
-        (pl.col("NCLNLS") / (pl.col("LNLSGR") + eps)).alias("nclnls_ratio"),
-        (pl.col("NAASSET") / (pl.col("ASSET") + eps)).alias("naasset_ratio"),
-        (pl.col("ORE") / (pl.col("ASSET") + eps)).alias("ore_ratio"),
-        (pl.col("LNATRES") / (pl.col("LNLSGR") + eps)).alias("lnatres_ratio"),
-        # Texas Ratio = (Nonperforming Loans + Other Real Estate Owned) / (Tangible Equity + Loan Loss Reserves)
-        (
-            (pl.col("NCLNLS").fill_null(0) + pl.col("ORE").fill_null(0))
-            / (pl.col("EQ").fill_null(0) + pl.col("LNATRES").fill_null(0) + eps)
-        ).alias("texas_ratio"),
-
-        # Management Quality / Efficiency: Non-interest expense / Operating Net Revenue
-        (
-            pl.col("NONIX")
-            / (pl.col("INTINC") - pl.col("EINTEXP") + pl.col("NONII") + eps)
-        ).alias("efficiency_ratio"),
-
-        # Earnings
-        (pl.col("ROA") / 100.0).alias("roa_q"),
+    df = df.with_columns(
+        # C
+        safe_div(pl.col("EQ"), asset).alias("eq_asset_ratio"),
+        # Basel risk-based ratios were not reported before 1990: a recorded 0 is "not available", not "zero capital"
+        pl.when(pre_basel & (pl.col("RBC1AAJ") == 0)).then(None).otherwise(pl.col("RBC1AAJ")).alias("rbc1aaj_clean"),
+        pl.when(pre_basel & (pl.col("RBCRWAJ") == 0)).then(None).otherwise(pl.col("RBCRWAJ")).alias("rbcrwaj_clean"),
+        ((pl.col("EQ") < 0) | (safe_div(pl.col("EQ"), asset) < 0.02)).cast(pl.Float64).alias("cap_distress_flag"),
+        # A
+        safe_div(pl.col("NCLNLS"), loans).alias("nclnls_ratio"),
+        safe_div(pl.col("NAASSET"), asset).alias("naasset_ratio"),
+        safe_div(pl.col("ORE"), asset).alias("ore_ratio"),
+        safe_div(pl.col("LNATRES"), loans).alias("lnatres_ratio"),
+        texas_expr().alias("texas_ratio"),
+        # M: non-interest expense / (net interest income + non-interest income), both year-to-date
+        safe_div(pl.col("NONIX"), pl.col("INTINC") - pl.col("EINTEXP") + pl.col("NONII")).alias("efficiency_ratio"),
+        # E  (ROA / NIMY as reported by FDIC: annualised, year-to-date, in percent)
+        (pl.col("ROA") / 100.0).alias("roa_ytd"),
         (pl.col("NIMY") / 100.0).alias("nimy_clean"),
-        (pl.col("ELNATR_Q") / (pl.col("ASSET") + eps)).alias("provision_asset_ratio"),
-        (pl.col("NETINC_Q") / (pl.col("ASSET") + eps)).alias("netinc_q_asset_ratio"),
+        safe_div(pl.col("ELNATR_Q"), asset).alias("provision_asset_ratio"),
+        safe_div(pl.col("NETINC_Q"), asset).alias("netinc_q_asset_ratio"),
+        # L
+        safe_div(pl.col("CHBAL") + pl.col("SC"), asset).alias("liquid_asset_ratio"),
+        safe_div(pl.col("BRO"), dep).alias("brokered_dep_ratio"),
+        safe_div(pl.col("LNLSNET"), dep).alias("loan_to_deposit_ratio"),
+        # S
+        safe_div(pl.col("LNRE"), loans).alias("re_loan_share"),
+        safe_div(pl.col("LNCI"), loans).alias("ci_loan_share"),
+        safe_div(pl.col("LNCON"), loans).alias("con_loan_share"),
+        asset.clip(lower_bound=1).log().alias("log_asset"),
+    )
 
-        # Liquidity
-        ((pl.col("CHBAL") + pl.col("SC")) / (pl.col("ASSET") + eps)).alias("liquid_asset_ratio"),
-        (pl.col("BRO") / (pl.col("DEP") + eps)).alias("brokered_dep_ratio"),
-        (pl.col("LNLSNET") / (pl.col("DEP") + eps)).alias("loan_to_deposit_ratio"),
+    log.info("Computing 4-quarter backward-looking dynamics (guarded: lag must be exactly 4 quarters)...")
+    ok4 = lag4_ok()
 
-        # Sensitivity & Loan Composition
-        (pl.col("LNRE") / (pl.col("LNLSGR") + eps)).alias("re_loan_share"),
-        (pl.col("LNCI") / (pl.col("LNLSGR") + eps)).alias("ci_loan_share"),
-        (pl.col("LNCON") / (pl.col("LNLSGR") + eps)).alias("con_loan_share"),
+    def d4(col: str) -> pl.Expr:
+        return pl.when(ok4).then(pl.col(col) - pl.col(col).shift(4).over("CERT")).otherwise(None)
 
-        # Size
-        (pl.col("ASSET").clip(lower_bound=1).log()).alias("log_asset"),
-    ])
+    def growth(col: str) -> pl.Expr:
+        prev = pl.col(col).shift(4).over("CERT")
+        return pl.when(ok4 & (prev > 0)).then(pl.col(col) / prev - 1).otherwise(None)
 
-    log.info("Computing 4-quarter historical lag dynamics per CERT...")
-    # Lags are sorted by CERT and REPDTE, taking shift strictly backwards
-    df = df.sort(["CERT", "REPDTE"])
-
-    df = df.with_columns([
-        (
-            (pl.col("ASSET") - pl.col("ASSET").shift(4).over("CERT"))
-            / (pl.col("ASSET").shift(4).over("CERT") + eps)
-        ).alias("asset_growth_4q"),
-        (
-            (pl.col("LNLSGR") - pl.col("LNLSGR").shift(4).over("CERT"))
-            / (pl.col("LNLSGR").shift(4).over("CERT") + eps)
-        ).alias("loan_growth_4q"),
-        (
-            pl.col("texas_ratio") - pl.col("texas_ratio").shift(4).over("CERT")
-        ).alias("d4_texas_ratio"),
-        (
-            pl.col("nclnls_ratio") - pl.col("nclnls_ratio").shift(4).over("CERT")
-        ).alias("d4_nclnls_ratio"),
-        (
-            pl.col("eq_asset_ratio") - pl.col("eq_asset_ratio").shift(4).over("CERT")
-        ).alias("d4_eq_ratio"),
-    ])
-
-    return df
+    return df.with_columns(
+        growth("ASSET").alias("asset_growth_4q"),
+        growth("LNLSGR").alias("loan_growth_4q"),
+        d4("texas_ratio").alias("d4_texas_ratio"),
+        d4("nclnls_ratio").alias("d4_nclnls_ratio"),
+        d4("eq_asset_ratio").alias("d4_eq_ratio"),
+    ).drop(["year", "quarter", "qidx"])
 
 
 def build_gold_features(silver_df: pl.DataFrame | None = None) -> pl.DataFrame:
-    """Build the final leak-free Gold feature table with target labels and split assignments."""
+    """Silver -> Gold: label + split + features."""
+    from .labels import assign_splits, attach_labels
+
     if silver_df is None:
         silver_path = data_dir("silver") / "panel.parquet"
         log.info(f"Reading silver panel from {silver_path}...")
         silver_df = pl.read_parquet(silver_path)
 
-    from .labels import assign_splits, attach_labels
-
-    log.info("Constructing target labels...")
-    df_labeled = attach_labels(silver_df)
-
-    log.info("Assigning Dev / Purge / Test splits...")
-    df_split = assign_splits(df_labeled)
-
-    log.info("Generating feature set...")
-    df_features = compute_camels_features(df_split)
+    log.info("Constructing target labels and point-in-time flags...")
+    df = assign_splits(attach_labels(silver_df))
+    log.info("Generating features...")
+    df = compute_camels_features(df)
 
     gold_path = data_dir("gold") / "features.parquet"
-    log.info(f"Writing Gold feature dataset to {gold_path} ({df_features.height:,} rows)...")
-    df_features.write_parquet(gold_path, compression="zstd", compression_level=3)
-    return df_features
+    log.info(f"Writing Gold feature dataset to {gold_path} ({df.height:,} rows)...")
+    df.write_parquet(gold_path, compression="zstd", compression_level=3)
+    return df

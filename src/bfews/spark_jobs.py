@@ -1,175 +1,150 @@
-"""PySpark implementations of core transformations, execution plan audit, and MLlib demo (Part 3 & 5)."""
+"""PySpark: core transformations (same logic as core.py), execution plan, per-year parity, MLlib demo."""
 from __future__ import annotations
 
 import io
+import time
 from contextlib import redirect_stdout
 from pathlib import Path
 
+from .core import texas_cap
 from .utils import cfg, data_dir, get_logger
 
 log = get_logger("spark")
 
 
 def get_spark_session(app_name: str = "BFT65B-BankFailurePipeline"):
-    """Create local SparkSession with conservative memory configuration for laptops."""
+    """Local SparkSession with a conservative memory configuration for a laptop."""
     from pyspark.sql import SparkSession
 
-    builder = (
-        SparkSession.builder.appName(app_name)
-        .master("local[2]")
-        .config("spark.driver.memory", "1200m")
-        .config("spark.sql.shuffle.partitions", "8")
-        .config("spark.default.parallelism", "4")
-        .config("spark.sql.caseSensitive", "true")
-        .config("spark.sql.adaptive.enabled", "true")
-        .config("spark.ui.enabled", "false")
-        .config("spark.driver.extraJavaOptions", "-XX:+UseG1GC -Dderby.system.home=/tmp/derby")
-    )
-    return builder.getOrCreate()
+    s = cfg()["spark"]
+    return (SparkSession.builder.appName(app_name).master(s["master"])
+            .config("spark.driver.memory", s["driver_memory"])
+            .config("spark.sql.shuffle.partitions", str(s["shuffle_partitions"]))
+            .config("spark.default.parallelism", "4")
+            .config("spark.sql.adaptive.enabled", "true")
+            .config("spark.ui.enabled", "false")
+            .config("spark.driver.extraJavaOptions", "-XX:+UseG1GC -Dderby.system.home=/tmp/derby")
+            .getOrCreate())
 
 
-def run_spark_pipeline(bronze_path: Path | None = None) -> tuple[dict, str]:
-    """Execute core bank pipeline in PySpark, extract formatted execution plan, and collect metrics."""
+SPARK_OUT = ["NETINC_Q", "eq_asset_ratio", "texas_ratio", "asset_growth_4q", "d4_texas_ratio"]
+
+
+def spark_core(spark, bronze_path: Path):
+    """The six core steps from core.py, written with Spark window functions."""
+    from pyspark.sql import Window
     from pyspark.sql import functions as F
-    from pyspark.sql.window import Window
 
-    if bronze_path is None:
-        bronze_path = data_dir("bronze") / "financials"
-
-    spark = get_spark_session()
-    log.info(f"Reading bronze Parquet via PySpark from {bronze_path}...")
-    cols = ["CERT", "REPDTE", "YEAR", "ASSET", "EQ", "LNLSGR", "NCLNLS", "ORE", "LNATRES", "NETINC", "INTINC"]
+    cols = ["CERT", "REPDTE", "YEAR", "ASSET", "EQ", "NCLNLS", "ORE", "LNATRES", "NETINC"]
     df = spark.read.parquet(str(bronze_path)).select(*cols)
-
-    # 1. Window specs
+    cap = F.lit(texas_cap())
     w_year = Window.partitionBy("CERT", "YEAR").orderBy("REPDTE")
     w_cert = Window.partitionBy("CERT").orderBy("REPDTE")
 
-    # 2. De-cumulate quarterly flows
-    quarter_col = F.quarter("REPDTE")
-    df = df.withColumn("quarter", quarter_col)
+    df = df.withColumn("quarter", F.quarter("REPDTE")).withColumn("qidx", F.col("YEAR") * 4 + F.col("quarter"))
+    prev_ok = F.lag("qidx", 1).over(w_year) == F.col("qidx") - 1
+    num = F.coalesce(F.col("NCLNLS"), F.lit(0.0)) + F.coalesce(F.col("ORE"), F.lit(0.0))
+    den = F.coalesce(F.col("EQ"), F.lit(0.0)) + F.coalesce(F.col("LNATRES"), F.lit(0.0))
+    df = (df.withColumn("NETINC_Q", F.when(F.col("quarter") == 1, F.col("NETINC"))
+                        .when(prev_ok, F.col("NETINC") - F.lag("NETINC", 1).over(w_year)))
+            .withColumn("eq_asset_ratio", F.col("EQ") / F.col("ASSET"))
+            .withColumn("texas_ratio", F.when(den > 0, F.least(num / den, cap)).otherwise(cap)))
+    lag4_ok = F.lag("qidx", 4).over(w_cert) == F.col("qidx") - 4
+    return (df.withColumn("asset_growth_4q", F.when(lag4_ok, F.col("ASSET") / F.lag("ASSET", 4).over(w_cert) - 1))
+              .withColumn("d4_texas_ratio", F.when(lag4_ok, F.col("texas_ratio") - F.lag("texas_ratio", 4).over(w_cert))))
 
-    df_trans = (
-        df.withColumn(
-            "NETINC_Q",
-            F.when(quarter_col == 1, F.col("NETINC")).otherwise(
-                F.col("NETINC") - F.lag("NETINC", 1).over(w_year)
-            ),
-        )
-        .withColumn(
-            "INTINC_Q",
-            F.when(quarter_col == 1, F.col("INTINC")).otherwise(
-                F.col("INTINC") - F.lag("INTINC", 1).over(w_year)
-            ),
-        )
-    )
 
-    # 3. CAMELS and Texas Ratio
-    eps = 1e-4
-    df_trans = (
-        df_trans.withColumn("eq_asset_ratio", F.col("EQ") / (F.col("ASSET") + eps))
-        .withColumn("nclnls_ratio", F.col("NCLNLS") / (F.col("LNLSGR") + eps))
-        .withColumn(
-            "texas_ratio",
-            (F.coalesce(F.col("NCLNLS"), F.lit(0.0)) + F.coalesce(F.col("ORE"), F.lit(0.0)))
-            / (F.coalesce(F.col("EQ"), F.lit(0.0)) + F.coalesce(F.col("LNATRES"), F.lit(0.0)) + eps),
-        )
-    )
+def spark_yearly_summary(df) -> list[dict]:
+    """Per-YEAR row count, column sums and null counts: a 43-row fingerprint of the full output."""
+    from pyspark.sql import functions as F
 
-    # 4. Lag dynamics
-    df_trans = df_trans.withColumn("d4_texas_ratio", F.col("texas_ratio") - F.lag("texas_ratio", 4).over(w_cert))
+    aggs = [F.count("*").alias("rows")]
+    for c in SPARK_OUT:
+        aggs += [F.sum(c).alias(f"{c}__sum"), F.sum(F.col(c).isNull().cast("int")).alias(f"{c}__nulls")]
+    return [r.asDict() for r in df.groupBy("YEAR").agg(*aggs).orderBy("YEAR").collect()]
 
-    # Capture physical execution plan
-    f = io.StringIO()
-    with redirect_stdout(f):
-        df_trans.explain(mode="formatted")
-    plan_str = f.getvalue()
 
-    # Single aggregation pass to compute count + means simultaneously
-    agg_row = df_trans.select([
-        F.count("*").alias("row_count"),
-        F.round(F.mean("eq_asset_ratio"), 5).alias("mean_eq_ratio"),
-        F.round(F.mean("texas_ratio"), 5).alias("mean_texas_ratio"),
-        F.round(F.mean("NETINC_Q"), 2).alias("mean_netinc_q"),
-    ]).collect()[0]
+def spark_sample_rows(df, modulo: int = 50) -> list[dict]:
+    """Row-level output for a deterministic subset of banks (CERT % modulo == 0)."""
+    cols = ["CERT", "REPDTE"] + SPARK_OUT
+    return [r.asDict() for r in df.filter(df.CERT % modulo == 0).select(*cols).collect()]
 
-    summary = {
-        "row_count": int(agg_row["row_count"]),
-        "mean_eq_ratio": float(agg_row["mean_eq_ratio"]),
-        "mean_texas_ratio": float(agg_row["mean_texas_ratio"]),
-        "mean_netinc_q": float(agg_row["mean_netinc_q"]),
-    }
 
-    return summary, plan_str
+def spark_plan_text(df) -> str:
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        df.explain(mode="formatted")
+    return buf.getvalue()
+
+
+def timed(fn):
+    t0 = time.perf_counter()
+    out = fn()
+    return out, time.perf_counter() - t0
+
+
+MLLIB_FEATURES = ["eq_asset_ratio", "nclnls_ratio", "texas_ratio", "efficiency_ratio",
+                  "roa_ytd", "liquid_asset_ratio", "loan_to_deposit_ratio", "log_asset"]
+# demo split lives entirely inside the development period (the test period is never touched here)
+MLLIB_TRAIN_END, MLLIB_VAL_START, MLLIB_VAL_END = "1988-12-31", "1990-03-31", "1992-12-31"
 
 
 def run_spark_mllib_demo(gold_path: Path | None = None) -> dict:
-    """Train a PySpark MLlib Logistic Regression model on the Gold feature dataset (Part 5 requirement)."""
+    """MLlib logistic regression on a development-only split, compared with scikit-learn on the same rows.
+
+    Train: <= 1988Q4; purge: 1989; validation: 1990Q1-1992Q4. Rows that could not have been scored in real time
+    (`pit_scorable == False`) are excluded, as in the main model.
+    """
+    import numpy as np
+    import polars as pl
     from pyspark.ml.classification import LogisticRegression
     from pyspark.ml.evaluation import BinaryClassificationEvaluator
     from pyspark.ml.feature import Imputer, StandardScaler, VectorAssembler
     from pyspark.sql import functions as F
+    from sklearn.impute import SimpleImputer
+    from sklearn.linear_model import LogisticRegression as SkLR
+    from sklearn.metrics import average_precision_score, roc_auc_score
+    from sklearn.preprocessing import StandardScaler as SkScaler
 
-    if gold_path is None:
-        gold_path = data_dir("gold") / "features.parquet"
-
+    gold_path = gold_path or data_dir("gold") / "features.parquet"
     spark = get_spark_session()
-    log.info(f"Reading Gold features for MLlib from {gold_path}...")
+    f = MLLIB_FEATURES
+    sdf = (spark.read.parquet(str(gold_path))
+           .select(*f, "target_fail_4q", "split_group", "pit_scorable", "REPDTE")
+           .filter((F.col("split_group") == "DEV") & F.col("pit_scorable"))
+           .withColumn("label", F.col("target_fail_4q").cast("double")))
+    for c in f:  # same clamp as the sklearn side: keeps ratios with near-zero denominators finite
+        sdf = sdf.withColumn(c, F.greatest(F.least(F.col(c).cast("double"), F.lit(100.0)), F.lit(-100.0)))
+    train = sdf.filter(F.col("REPDTE") <= F.lit(MLLIB_TRAIN_END).cast("date"))
+    val = sdf.filter(F.col("REPDTE").between(F.lit(MLLIB_VAL_START).cast("date"), F.lit(MLLIB_VAL_END).cast("date")))
 
-    feature_cols = [
-        "eq_asset_ratio", "nclnls_ratio", "texas_ratio", "efficiency_ratio",
-        "roa_q", "liquid_asset_ratio", "loan_to_deposit_ratio", "log_asset"
-    ]
+    imp = Imputer(inputCols=f, outputCols=[f"{c}_i" for c in f]).setStrategy("median").fit(train)
+    asm = VectorAssembler(inputCols=[f"{c}_i" for c in f], outputCol="raw", handleInvalid="keep")
+    prep_train = asm.transform(imp.transform(train))
+    scaler = StandardScaler(inputCol="raw", outputCol="features", withMean=True, withStd=True).fit(prep_train)
+    lr = LogisticRegression(featuresCol="features", labelCol="label", maxIter=50, regParam=0.0).fit(
+        scaler.transform(prep_train))
+    pred = lr.transform(scaler.transform(asm.transform(imp.transform(val))))
+    ev = lambda m: BinaryClassificationEvaluator(labelCol="label", metricName=m).evaluate(pred)  # noqa: E731
+    out = {"mllib_val_roc_auc": round(ev("areaUnderROC"), 4), "mllib_val_pr_auc": round(ev("areaUnderPR"), 4),
+           "train_rows": int(train.count()), "val_rows": int(val.count()),
+           "val_failure_rows": int(val.filter("label = 1").count()),
+           "split": f"train <= {MLLIB_TRAIN_END}; validate {MLLIB_VAL_START}..{MLLIB_VAL_END}; 1989 purged"}
 
-    df_model = (
-        spark.read.parquet(str(gold_path))
-        .select(*(feature_cols + ["target_fail_4q", "split_group"]))
-        .filter(F.col("split_group").isin("DEV", "TEST"))
-        .dropna(subset=["target_fail_4q"])
-        .withColumn("target_fail_4q", F.col("target_fail_4q").cast("double"))
-    )
-    for c in feature_cols:
-        df_model = df_model.withColumn(
-            c,
-            F.when(F.col(c).isNull() | F.isnan(F.col(c)), F.lit(float("nan")))
-            .otherwise(F.greatest(F.least(F.col(c).cast("double"), F.lit(100.0)), F.lit(-100.0))),
-        )
+    # scikit-learn on exactly the same rows and features
+    def to_np(sdf_):
+        rows = sdf_.select(*f, "label").collect()
+        arr = np.array([[np.nan if r[c] is None else r[c] for c in f] + [r["label"]] for r in rows], dtype=float)
+        return arr[:, :-1], arr[:, -1]
 
-    imputer = Imputer(inputCols=feature_cols, outputCols=[f"{c}_imp" for c in feature_cols]).setStrategy("median")
-    assembler = VectorAssembler(inputCols=[f"{c}_imp" for c in feature_cols], outputCol="raw_features", handleInvalid="keep")
-    scaler = StandardScaler(inputCol="raw_features", outputCol="features", withStd=True, withMean=True)
-
-    train_df = df_model.filter(F.col("split_group") == "DEV")
-    test_df = df_model.filter(F.col("split_group") == "TEST")
-
-    imp_model = imputer.fit(train_df)
-    imputed_train = imp_model.transform(train_df)
-    assembled_train = assembler.transform(imputed_train)
-    scaler_model = scaler.fit(assembled_train)
-    scaled_train = scaler_model.transform(assembled_train)
-
-    lr = LogisticRegression(featuresCol="features", labelCol="target_fail_4q", maxIter=20, regParam=0.01)
-    lr_model = lr.fit(scaled_train)
-
-    imputed_test = imp_model.transform(test_df)
-    assembled_test = assembler.transform(imputed_test)
-    scaled_test = scaler_model.transform(assembled_test)
-    predictions = lr_model.transform(scaled_test)
-
-    evaluator_roc = BinaryClassificationEvaluator(labelCol="target_fail_4q", rawPredictionCol="rawPrediction", metricName="areaUnderROC")
-    evaluator_pr = BinaryClassificationEvaluator(labelCol="target_fail_4q", rawPredictionCol="rawPrediction", metricName="areaUnderPR")
-
-    roc_auc = evaluator_roc.evaluate(predictions)
-    pr_auc = evaluator_pr.evaluate(predictions)
-
-    n_train = int(train_df.count())
-    n_test = int(test_df.count())
+    xtr, ytr = to_np(train)
+    xva, yva = to_np(val)
+    sk_imp = SimpleImputer(strategy="median").fit(xtr)
+    sk_sc = SkScaler().fit(sk_imp.transform(xtr))
+    sk = SkLR(C=1e6, max_iter=500).fit(sk_sc.transform(sk_imp.transform(xtr)), ytr)
+    p = sk.predict_proba(sk_sc.transform(sk_imp.transform(xva)))[:, 1]
+    out["sklearn_val_roc_auc"] = round(float(roc_auc_score(yva, p)), 4)
+    out["sklearn_val_pr_auc"] = round(float(average_precision_score(yva, p)), 4)
     spark.stop()
-
-    log.info(f"Spark MLlib Test ROC-AUC: {roc_auc:.4f}, PR-AUC: {pr_auc:.4f}")
-    return {
-        "mllib_test_roc_auc": round(roc_auc, 4),
-        "mllib_test_pr_auc": round(pr_auc, 4),
-        "train_rows": n_train,
-        "test_rows": n_test,
-    }
+    log.info(f"MLlib vs scikit-learn on the same development split: {out}")
+    return out

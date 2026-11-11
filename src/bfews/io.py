@@ -74,16 +74,22 @@ def bronze_financials_path() -> Path:
 
 
 def write_bronze_financials(df: pl.DataFrame, compression: str = "zstd", level: int = 3) -> Path:
-    """Hive-partitioned by YEAR, sorted by (REPDTE, CERT) inside each file so that row-group
-    min/max statistics allow predicate pushdown on dates and banks."""
+    """Hive layout `YEAR=YYYY/part-0.parquet`; YEAR lives only in the directory name (not duplicated in the file).
+
+    Inside each file rows are sorted by (REPDTE, CERT) so that row-group min/max statistics allow predicate
+    pushdown on dates and banks.
+    """
     out = bronze_financials_path()
     if out.exists():
         import shutil
         shutil.rmtree(out)
-    (df.with_columns(pl.col("REPDTE").dt.year().alias("YEAR"))
-       .sort(["REPDTE", "CERT"])
-       .write_parquet(out, compression=compression, compression_level=level,
-                      statistics=True, row_group_size=50_000, partition_by=["YEAR"]))
+    df = df.sort(["REPDTE", "CERT"])
+    for year in sorted(df["REPDTE"].dt.year().unique().to_list()):
+        part = out / f"YEAR={year}"
+        part.mkdir(parents=True, exist_ok=True)
+        (df.filter(pl.col("REPDTE").dt.year() == year)
+           .write_parquet(part / "part-0.parquet", compression=compression, compression_level=level,
+                          statistics=True, row_group_size=50_000))
     return out
 
 
@@ -91,11 +97,28 @@ def scan_bronze() -> pl.LazyFrame:
     return pl.scan_parquet(bronze_financials_path(), hive_partitioning=True)
 
 
+def read_bronze(columns: list[str] | None = None) -> pl.DataFrame:
+    return pl.read_parquet(bronze_financials_path(), hive_partitioning=True, columns=columns)
+
+
 def parse_failures() -> pl.DataFrame:
     return (pl.read_parquet(raw_dir() / "failures.parquet")
               .with_columns(pl.col("CERT").cast(pl.Int32),
                             pl.col("FAILDATE").str.strptime(pl.Date, "%m/%d/%Y"),
                             pl.col("FAILYR").cast(pl.Int32)))
+
+
+def failures_by_cert() -> pl.DataFrame:
+    """One row per CERT: its EARLIEST failure/assistance event (88 CERTs appear more than once in the raw table).
+
+    RESTYPE is kept: FDIC lists both closures (FAILURE) and open-bank assistance (ASSISTANCE) in this table; the
+    course defines the label from this table, so both count as failure events (counts are reported by type).
+    """
+    return (parse_failures()
+            .filter(pl.col("CERT").is_not_null() & pl.col("FAILDATE").is_not_null())
+            .sort(["CERT", "FAILDATE"])
+            .group_by("CERT", maintain_order=True)
+            .agg(pl.col("FAILDATE").first(), pl.col("RESTYPE").first().alias("FAILTYPE")))
 
 
 def parse_institutions() -> pl.DataFrame:

@@ -122,9 +122,10 @@ def test_polars_spark_parity():
     parity_file = out_dir("tables") / "spark_polars_parity.json"
     assert parity_file.exists(), "Run 06_spark.py first"
     data = json.loads(parity_file.read_text())
-    assert data["difference"]["row_count_diff"] == 0
-    assert data["difference"]["mean_eq_ratio_abs_diff"] < 1e-4
-    assert data["difference"]["mean_texas_ratio_abs_diff"] < 1e-3
+    assert data["yearly_fingerprint"]["row_and_null_counts_identical"] is True
+    assert data["yearly_fingerprint"]["max_relative_diff_of_sums"] < 1e-10
+    assert data["row_level_sample"]["rows_only_in_one_engine"] == 0
+    assert data["row_level_sample"]["max_abs_diff_any_column"] < 1e-6
 
 
 def test_held_out_test_results():
@@ -136,7 +137,7 @@ def test_held_out_test_results():
     assert res_file.exists(), "Run 07_model.py first"
     res = json.loads(res_file.read_text())
     test_eval = res["held_out_test_evaluation"]
-    assert test_eval["total_failures"] >= 50
+    assert test_eval["failing_banks_total"] >= 50
     assert test_eval["roc_auc"] > 0.90
     assert test_eval["pr_auc"] > 0.50
 

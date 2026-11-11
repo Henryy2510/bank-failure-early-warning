@@ -1,20 +1,21 @@
 # Central configuration of the pipeline. All paths are relative to the project root (final/).
 paths:
-  raw: ./data_raw/fdic        # output of scripts/00_download.py (starter script layout)
+  raw: ./data_raw/fdic              # raw FDIC files (scripts/00_download.py or the course starter writes here)
   data: data                        # bronze / silver / gold layers (git-ignored)
   outputs: outputs                  # tables, figures, logs (committed)
 
 seed: 42
 
 panel:
-  first_quarter: "1984-03-31"
-  last_quarter: "2026-06-30"
   publication_lag_days: 60          # Call Report filing deadline (30-35 d) + FDIC publication buffer
-  exit_failure_window_days: 270     # a failure within this window after the last report = exit by failure
+  exit_failure_min_gap_days: -90    # FAILDATE - last report date must lie in [min, max] to call an exit a failure
+  exit_failure_max_gap_days: 540
 
 label:
-  horizon_quarters: 4               # y = 1{fail in (q, q+4]}
-  last_label_quarter: "2025-06-30"  # later labels are incomplete
+  last_label_quarter: "2025-06-30"  # y = 1{fail in (q, q+4 quarters]}; later labels are incomplete
+
+features:
+  texas_cap: 10.0                   # Texas ratio is capped; a non-positive denominator (EQ + reserves <= 0) = cap
 
 split:
   dev_end: "2007-12-31"             # development period: as-of quarters 1984Q1-2007Q4
@@ -24,12 +25,13 @@ split:
   cv_blocks: [[1988, 1988], [1990, 1990], [1992, 1992], [1994, 1999], [2000, 2007]]
 
 cost:
-  # cost of a missed failure  = median FDIC Deposit-Insurance-Fund loss (COST) of dev-period failures (data)
-  # cost of a false alarm     = one targeted (off-cycle) examination; assumption, see report section 5.4
+  # cost of a missed failure = median FDIC resolution loss rate (COST / assets at failure, dev failures only)
+  #                            x total assets of the missed bank (inflation-neutral, bank-level)
+  # cost of a false alarm    = one targeted (off-cycle) examination; ASSUMPTION, reported with sensitivity
   false_alarm_cost_kusd: 250
-  loss_avoidable_share: 1.0         # share of the DIF loss an early alarm could avoid (sensitivity analysed)
+  sensitivity_false_alarm_kusd: [100, 250, 500, 1000]
 
 spark:
-  master: "local[*]"
-  driver_memory: "4g"
-  shuffle_partitions: 24
+  master: "local[2]"
+  driver_memory: "1200m"
+  shuffle_partitions: 8

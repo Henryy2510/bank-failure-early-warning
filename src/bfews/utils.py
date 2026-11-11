@@ -107,8 +107,8 @@ def _child(q, fn, args, kwargs):
     t0 = time.perf_counter()
     try:
         res = fn(*args, **kwargs)
-        # Only retain scalar summary if a frame was returned
-        scalar_res = len(res) if hasattr(res, "__len__") and not isinstance(res, (dict, str)) else res
+        # Frames are reduced to their row count; small dict/scalar results are passed through unchanged.
+        scalar_res = int(res.shape[0]) if hasattr(res, "shape") else res
         del res
         gc.collect()
         err = None
