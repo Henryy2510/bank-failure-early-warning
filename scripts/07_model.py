@@ -65,13 +65,13 @@ def plot_model_curves(results: dict):
 def plot_crisis_breakdown(results: dict):
     """Plot performance across test crisis subperiods (GFC vs Modern/SVB)."""
     t_res = results["held_out_test_evaluation"]
-    gfc = t_res["subperiod_gfc_2009_2014"]
-    mod = t_res["subperiod_modern_2015_2025"]
+    gfc = t_res["gfc_2009_2014"]
+    mod = t_res["modern_2015_2025"]
 
     subperiods = ["GFC (2009-2014)", "Post-GFC / SVB (2015-2025)"]
     pr_vals = [gfc["pr_auc"], mod["pr_auc"]]
     roc_vals = [gfc["roc_auc"], mod["roc_auc"]]
-    fails = [gfc["total_failures"], mod["total_failures"]]
+    fails = [gfc["failing_banks"], mod["failing_banks"]]
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
     x = range(len(subperiods))
@@ -81,7 +81,7 @@ def plot_crisis_breakdown(results: dict):
     b2 = ax.bar([i + width / 2 for i in x], roc_vals, width, label="ROC-AUC", color="#5bc0de")
 
     for idx, (bar1, bar2, cnt) in enumerate(zip(b1, b2, fails)):
-        ax.text(idx, 0.05, f"Failures: {cnt:,}", ha="center", va="bottom", fontweight="bold", color="black",
+        ax.text(idx, 0.05, f"Failures: {cnt:,} banks", ha="center", va="bottom", fontweight="bold", color="black",
                 bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="grey", alpha=0.8))
 
     ax.set_xticks(list(x))
@@ -124,8 +124,8 @@ def main():
     log.info("Held-out Test Evaluation Results:")
     t_eval = results["held_out_test_evaluation"]
     log.info(f"Overall Test PR-AUC: {t_eval['pr_auc']}, ROC-AUC: {t_eval['roc_auc']}")
-    log.info(f"Optimal Threshold: {t_eval['optimal_threshold']}")
-    log.info(f"Confusion Matrix: {t_eval['confusion_matrix_at_opt_threshold']}")
+    log.info(f"Optimal Threshold: {t_eval['threshold']}")
+    log.info(f"At Threshold: {t_eval['at_threshold']}")
 
     plot_model_curves(results)
     plot_crisis_breakdown(results)

@@ -1,8 +1,9 @@
-"""Part 3 & 5: PySpark Core Pipeline, Execution Plan Analysis, and MLlib Modeling Demo."""
+"""Part 3 & 5: PySpark reproduction of the core steps, execution plan, parity with Polars, timing, MLlib demo."""
 from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -11,77 +12,95 @@ os.environ["POLARS_MAX_THREADS"] = "4"
 
 import polars as pl
 
+from src.bfews.core import CORE_COLS, core_polars
 from src.bfews.io import bronze_financials_path
-from src.bfews.spark_jobs import run_spark_mllib_demo, run_spark_pipeline
-from src.bfews.utils import data_dir, get_logger, out_dir, save_json
+from src.bfews.spark_jobs import (SPARK_OUT, get_spark_session, run_spark_mllib_demo, spark_core, spark_plan_text,
+                                  spark_sample_rows, spark_yearly_summary)
+from src.bfews.utils import get_logger, out_dir, save_json
 
 log = get_logger("06_spark")
+SAMPLE_MODULO = 50
 
 
-def main():
-    log.info("Starting Part 3 & 5: PySpark Pipeline & MLlib Demo...")
+def polars_reference(bronze_p: Path):
+    """Same core steps in Polars: per-year fingerprint and the same sample of banks."""
+    t0 = time.perf_counter()
+    out = core_polars(pl.scan_parquet(bronze_p, hive_partitioning=True).select(CORE_COLS + ["YEAR"])).collect()
+    yearly = (out.group_by("YEAR")
+              .agg(pl.len().alias("rows"),
+                   *[x for c in SPARK_OUT for x in (pl.col(c).sum().alias(f"{c}__sum"),
+                                                    pl.col(c).null_count().alias(f"{c}__nulls"))])
+              .sort("YEAR"))
+    seconds = time.perf_counter() - t0
+    sample = out.filter(pl.col("CERT") % SAMPLE_MODULO == 0).select(["CERT", "REPDTE"] + SPARK_OUT)
+    return yearly, sample, seconds
+
+
+def compare_yearly(spark_rows: list[dict], polars_yearly: pl.DataFrame) -> dict:
+    sp = pl.DataFrame(spark_rows).sort("YEAR")
+    assert sp["YEAR"].to_list() == polars_yearly["YEAR"].to_list(), "different set of years"
+    worst, exact_counts = 0.0, True
+    for c in sp.columns:
+        if c == "YEAR":
+            continue
+        a, b = sp[c].cast(pl.Float64).to_numpy(), polars_yearly[c].cast(pl.Float64).to_numpy()
+        if c == "rows" or c.endswith("__nulls"):
+            exact_counts &= bool((a == b).all())
+        else:
+            worst = max(worst, float((abs(a - b) / pl.Series([max(1.0, abs(x)) for x in b]).to_numpy()).max()))
+    return {"years_compared": sp.height, "row_and_null_counts_identical": exact_counts, "max_relative_diff_of_sums": worst}
+
+
+def compare_rows(spark_rows: list[dict], polars_sample: pl.DataFrame) -> dict:
+    sp = pl.DataFrame(spark_rows).with_columns(pl.col("CERT").cast(pl.Int32))
+    j = sp.join(polars_sample.with_columns(pl.col("CERT").cast(pl.Int32)), on=["CERT", "REPDTE"], how="full", suffix="_pl")
+    unmatched = int(j.filter(pl.col("CERT").is_null() | pl.col("CERT_pl").is_null()).height) if "CERT_pl" in j.columns else 0
+    worst = 0.0
+    for c in SPARK_OUT:
+        both = j.filter(pl.col(c).is_not_null() & pl.col(f"{c}_pl").is_not_null())
+        null_mismatch = int(j.filter(pl.col(c).is_null() != pl.col(f"{c}_pl").is_null()).height)
+        if null_mismatch:
+            return {"rows_compared": j.height, "null_pattern_mismatch": null_mismatch, "max_abs_diff": float("inf")}
+        if both.height:
+            worst = max(worst, float((both[c] - both[f"{c}_pl"]).abs().max()))
+    return {"banks_sampled": sp["CERT"].n_unique(), "rows_compared": j.height, "rows_only_in_one_engine": unmatched,
+            "max_abs_diff_any_column": worst}
+
+
+def main() -> None:
     bronze_p = bronze_financials_path()
+    log.info("Polars reference (same steps)...")
+    pl_yearly, pl_sample, t_polars = polars_reference(bronze_p)
+    log.info(f"Polars lazy collect + aggregate: {t_polars:.2f}s")
 
-    # 1. Compute Polars reference metrics on Bronze using identical formulas (low memory)
-    log.info("Computing Polars reference summary on Bronze for parity verification...")
-    eps = 1e-4
-    polars_ref = (
-        pl.scan_parquet(bronze_p, hive_partitioning=True)
-        .select(["CERT", "REPDTE", "YEAR", "ASSET", "EQ", "LNLSGR", "NCLNLS", "ORE", "LNATRES", "NETINC"])
-        .sort(["CERT", "REPDTE"])
-        .with_columns(pl.col("REPDTE").dt.quarter().alias("quarter"))
-        .with_columns([
-            pl.when(pl.col("quarter") == 1)
-            .then(pl.col("NETINC"))
-            .otherwise(pl.col("NETINC") - pl.col("NETINC").shift(1).over(["CERT", "YEAR"]))
-            .alias("NETINC_Q"),
-            (pl.col("EQ") / (pl.col("ASSET") + eps)).alias("eq_asset_ratio"),
-            (
-                (pl.col("NCLNLS").fill_null(0.0) + pl.col("ORE").fill_null(0.0))
-                / (pl.col("EQ").fill_null(0.0) + pl.col("LNATRES").fill_null(0.0) + eps)
-            ).alias("texas_ratio"),
-        ])
-        .select([
-            pl.len().alias("row_count"),
-            pl.col("eq_asset_ratio").mean().round(5).alias("mean_eq_ratio"),
-            pl.col("texas_ratio").mean().round(5).alias("mean_texas_ratio"),
-            pl.col("NETINC_Q").drop_nulls().mean().round(2).alias("mean_netinc_q"),
-        ])
-        .collect()
-    )
-    polars_summary = {
-        "row_count": int(polars_ref["row_count"].item()),
-        "mean_eq_ratio": float(polars_ref["mean_eq_ratio"].item()),
-        "mean_texas_ratio": float(polars_ref["mean_texas_ratio"].item()),
-        "mean_netinc_q": float(polars_ref["mean_netinc_q"].item()),
-    }
-    log.info(f"Polars Summary:  {polars_summary}")
+    t0 = time.perf_counter()
+    spark = get_spark_session()
+    t_session = time.perf_counter() - t0
+    df = spark_core(spark, bronze_p)
+    (out_dir("tables") / "spark_execution_plan.txt").write_text(spark_plan_text(df), encoding="utf-8")
 
-    # 2. Run PySpark Core Transformations
-    log.info("Running PySpark Core Pipeline on Bronze Parquet...")
-    spark_summary, plan_text = run_spark_pipeline(bronze_p)
+    t0 = time.perf_counter()
+    sp_yearly = spark_yearly_summary(df)
+    t_cold = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    spark_yearly_summary(df)
+    t_warm = time.perf_counter() - t0
+    sp_rows = spark_sample_rows(df, SAMPLE_MODULO)
+    spark.stop()
+    log.info(f"Spark: session {t_session:.1f}s, job cold {t_cold:.1f}s, job warm {t_warm:.1f}s")
 
-    log.info(f"PySpark Summary: {spark_summary}")
-    plan_out = out_dir("tables") / "spark_execution_plan.txt"
-    plan_out.write_text(plan_text, encoding="utf-8")
-    log.info(f"Saved PySpark formatted execution plan to {plan_out}")
+    parity = {"yearly_fingerprint": compare_yearly(sp_yearly, pl_yearly),
+              "row_level_sample": compare_rows(sp_rows, pl_sample),
+              "timing_seconds": {"polars_lazy_collect_plus_aggregate": round(t_polars, 2),
+                                 "spark_session_startup": round(t_session, 2),
+                                 "spark_job_cold": round(t_cold, 2), "spark_job_warm": round(t_warm, 2),
+                                 "note": "single in-process runs on the full panel; Spark = local[2], 1.2 GB driver"}}
+    log.info(f"Parity: {parity}")
+    save_json(parity, out_dir("tables") / "spark_polars_parity.json")
 
-    diff = {
-        "row_count_diff": spark_summary["row_count"] - polars_summary["row_count"],
-        "mean_eq_ratio_abs_diff": round(abs(spark_summary["mean_eq_ratio"] - polars_summary["mean_eq_ratio"]), 6),
-        "mean_texas_ratio_abs_diff": round(abs(spark_summary["mean_texas_ratio"] - polars_summary["mean_texas_ratio"]), 6),
-        "mean_netinc_q_abs_diff": round(abs(spark_summary["mean_netinc_q"] - polars_summary["mean_netinc_q"]), 4),
-    }
-    log.info(f"Engine Discrepancy Verification: {diff}")
-    save_json({"spark": spark_summary, "polars": polars_summary, "difference": diff}, out_dir("tables") / "spark_polars_parity.json")
-
-    # 3. Run PySpark MLlib Demo (Part 5 requirement)
-    log.info("Running PySpark MLlib Logistic Regression on Gold Features...")
-    mllib_results = run_spark_mllib_demo(data_dir("gold") / "features.parquet")
-    log.info(f"MLlib Results: {mllib_results}")
-    save_json(mllib_results, out_dir("tables") / "spark_mllib_results.json")
-
-    log.info("Part 3 & 5 PySpark tasks completed successfully.")
+    log.info("MLlib demo (development-only split)...")
+    save_json(run_spark_mllib_demo(), out_dir("tables") / "spark_mllib_results.json")
+    log.info("Part 3 / 5 Spark tasks complete.")
 
 
 if __name__ == "__main__":
