@@ -10,6 +10,7 @@ import polars as pl
 from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin, clone
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
+from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 from sklearn.pipeline import Pipeline
@@ -22,6 +23,35 @@ from .utils import cfg, data_dir, get_logger, out_dir, save_json
 
 log = get_logger("modeling")
 SEED = 42
+
+CAMELS_DIMENSIONS: dict[str, str] = {
+    "eq_asset_ratio": "C - Capital",
+    "rbc1aaj_clean": "C - Capital",
+    "rbcrwaj_clean": "C - Capital",
+    "cap_distress_flag": "C - Capital",
+    "nclnls_ratio": "A - Asset Quality",
+    "naasset_ratio": "A - Asset Quality",
+    "ore_ratio": "A - Asset Quality",
+    "lnatres_ratio": "A - Asset Quality",
+    "texas_ratio": "A - Asset Quality",
+    "efficiency_ratio": "M - Management",
+    "roa_ytd": "E - Earnings",
+    "nimy_clean": "E - Earnings",
+    "provision_asset_ratio": "E - Earnings",
+    "netinc_q_asset_ratio": "E - Earnings",
+    "liquid_asset_ratio": "L - Liquidity",
+    "brokered_dep_ratio": "L - Liquidity",
+    "loan_to_deposit_ratio": "L - Liquidity",
+    "re_loan_share": "S - Sensitivity",
+    "ci_loan_share": "S - Sensitivity",
+    "con_loan_share": "S - Sensitivity",
+    "log_asset": "Size & Dynamics",
+    "asset_growth_4q": "Size & Dynamics",
+    "loan_growth_4q": "Size & Dynamics",
+    "d4_texas_ratio": "Size & Dynamics",
+    "d4_nclnls_ratio": "Size & Dynamics",
+    "d4_eq_ratio": "Size & Dynamics",
+}
 
 
 class RobustWinsorizer(BaseEstimator, TransformerMixin):
@@ -249,12 +279,43 @@ def load_modeling_frame(gold_path: Path | None = None) -> pl.DataFrame:
             .collect())
 
 
-def run_walk_forward_cv(dev: pl.DataFrame, features: list[str], kind: str):
+def _ap_scorer(estimator, X, y, sample_weight=None) -> float:
+    """Weighted binary Average Precision (PR-AUC) scorer extracting positive-class probability."""
+    p = estimator.predict_proba(X)[:, 1]
+    return float(average_precision_score(y, p, sample_weight=sample_weight))
+
+
+def _stratified_val_sample(X: np.ndarray, y: np.ndarray, max_neg: int, seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Keep all positive rows and a deterministic negative subsample with inverse-probability weights."""
+    pos_idx = np.flatnonzero(y == 1)
+    neg_idx = np.flatnonzero(y == 0)
+    if len(neg_idx) > max_neg:
+        rng = np.random.default_rng(seed)
+        neg_sub = rng.choice(neg_idx, size=max_neg, replace=False)
+        w_neg = len(neg_idx) / float(max_neg)
+    else:
+        neg_sub = neg_idx
+        w_neg = 1.0
+    sub_idx = np.concatenate([pos_idx, neg_sub])
+    w_sub = np.concatenate([np.ones(len(pos_idx), dtype=np.float64), np.full(len(neg_sub), w_neg, dtype=np.float64)])
+    return X[sub_idx], y[sub_idx], w_sub
+
+
+def run_walk_forward_cv(
+    dev: pl.DataFrame,
+    features: list[str],
+    kind: str,
+    explain_acc: list[dict[str, Any]] | None = None,
+):
     """Expanding-window validation in the development period.
 
     For a validation block starting in year Y the model is trained on quarters dated before Y-1; one year is purged
     so that no training label window (4 quarters ahead) reaches into the validation block.
     """
+    exp_cfg = cfg().get("explainability", {})
+    perm_repeats = int(exp_cfg.get("perm_repeats", 5))
+    max_neg = int(exp_cfg.get("max_neg_per_fold", 25000))
+
     year = dev["REPDTE"].dt.year()
     folds, oof = [], {"cert": [], "repdte": [], "y": [], "p": [], "asset": []}
     for y0, y1 in cfg()["split"]["cv_blocks"]:
@@ -262,8 +323,10 @@ def run_walk_forward_cv(dev: pl.DataFrame, features: list[str], kind: str):
         if tr.height < 5000 or va.height == 0:
             continue
         model = make_model(kind).fit(tr.select(features).to_numpy(), tr["target_fail_4q"].to_numpy())
-        p = model.predict_proba(va.select(features).to_numpy())[:, 1]
+        X_va = va.select(features).to_numpy()
+        p = model.predict_proba(X_va)[:, 1]
         y = va["target_fail_4q"].to_numpy()
+        n_pos = int(y.sum())
         folds.append({**evaluate_predictions(y, p), "val_years": f"{y0}-{y1}",
                       "failing_banks": int(va.filter(pl.col("target_fail_4q") == 1)["CERT"].n_unique())})
         oof["cert"].append(va["CERT"].to_numpy())
@@ -271,9 +334,205 @@ def run_walk_forward_cv(dev: pl.DataFrame, features: list[str], kind: str):
         oof["y"].append(y)
         oof["p"].append(p)
         oof["asset"].append(va["ASSET"].to_numpy())
-        del tr, va, model
+
+        if explain_acc is not None:
+            fold_idx = len(folds)
+            if kind == "logit":
+                keep = model.named_steps["winsor"].keep_
+                coefs = model.named_steps["model"].estimator_.coef_[0]
+                row_coef = np.full(len(features), np.nan, dtype=np.float64)
+                row_coef[keep] = coefs[: int(keep.sum())]
+                explain_acc.append({"val_years": f"{y0}-{y1}", "pos": n_pos, "coef": row_coef})
+            elif kind == "hgb":
+                X_sub, y_sub, w_sub = _stratified_val_sample(X_va, y, max_neg=max_neg, seed=SEED + fold_idx)
+                perm = permutation_importance(
+                    model,
+                    X_sub,
+                    y_sub,
+                    scoring=_ap_scorer,
+                    n_repeats=perm_repeats,
+                    n_jobs=1,
+                    random_state=SEED + fold_idx,
+                    sample_weight=w_sub,
+                )
+                explain_acc.append({
+                    "val_years": f"{y0}-{y1}",
+                    "pos": n_pos,
+                    "imp_mean": perm.importances_mean,
+                    "imp_std": perm.importances_std,
+                })
+
+        del tr, va, X_va, model
         gc.collect()
     return folds, {k: np.concatenate(v) for k, v in oof.items()}
+
+
+def summarize_dev_feature_importance(
+    features: list[str],
+    hgb_folds_imp: list[dict[str, Any]],
+    logit_folds_imp: list[dict[str, Any]],
+) -> pl.DataFrame:
+    """Aggregate strictly DEV out-of-fold HGB permutation importance and standardized Logit directionality."""
+    hgb_weights = np.array([f["pos"] for f in hgb_folds_imp], dtype=np.float64)
+    hgb_means = np.vstack([f["imp_mean"] for f in hgb_folds_imp])
+    hgb_stds = np.vstack([f["imp_std"] for f in hgb_folds_imp])
+    w_norm = hgb_weights / np.maximum(1.0, hgb_weights.sum())
+
+    perm_mean = (hgb_means * w_norm[:, None]).sum(axis=0)
+    perm_std = np.sqrt(((hgb_stds ** 2) * w_norm[:, None]).sum(axis=0))
+
+    logit_weights = np.array([f["pos"] for f in logit_folds_imp], dtype=np.float64)
+    logit_coefs = np.vstack([f["coef"] for f in logit_folds_imp])
+
+    rows = []
+    for j, feat in enumerate(features):
+        col_coefs = logit_coefs[:, j]
+        valid = np.isfinite(col_coefs)
+        if np.any(valid):
+            w_v = logit_weights[valid]
+            beta = float(np.sum(col_coefs[valid] * w_v) / np.maximum(1.0, np.sum(w_v)))
+            direction = "+ Increase Risk" if beta > 0 else "- Reduce Risk"
+        else:
+            beta = 0.0
+            direction = "N/A"
+        rows.append({
+            "feature": feat,
+            "camels_dim": CAMELS_DIMENSIONS.get(feat, "Other"),
+            "hgb_perm_pr_auc": round(float(perm_mean[j]), 5),
+            "hgb_perm_std": round(float(perm_std[j]), 5),
+            "logit_std_coef": round(beta, 4),
+            "logit_direction": direction,
+        })
+
+    df_imp = (
+        pl.DataFrame(rows)
+        .sort(["hgb_perm_pr_auc", "feature"], descending=[True, False])
+        .with_row_index("rank", offset=1)
+        .with_columns((pl.col("rank") <= 10).alias("in_top10"))
+    )
+    return df_imp
+
+
+def extract_canary_case_studies(
+    test: pl.DataFrame,
+    p_test: np.ndarray,
+    theta: float,
+    top_gfc: int | None = None,
+    top_modern: int | None = None,
+) -> pl.DataFrame:
+    """Post-hoc diagnostic report on the largest real receivership failures in the held-out TEST set."""
+    cs_cfg = cfg().get("case_studies", {})
+    top_gfc = int(cs_cfg.get("top_gfc", 5) if top_gfc is None else top_gfc)
+    top_modern = int(cs_cfg.get("top_modern", 5) if top_modern is None else top_modern)
+
+    ranked = (
+        test.select("REPDTE")
+        .with_columns(pl.Series("p", p_test), pl.arange(0, test.height).alias("idx"))
+        .with_columns(
+            pl.col("p").rank(method="ordinal", descending=True).over("REPDTE").alias("rk"),
+            pl.len().over("REPDTE").alias("n_q"),
+        )
+        .sort("idx")
+    )
+    rk = ranked["rk"].to_numpy()
+    nq = ranked["n_q"].to_numpy()
+    flag_top1 = rk <= np.maximum(1, np.round(nq * 0.01).astype(int))
+    flag_top2 = rk <= np.maximum(1, np.round(nq * 0.02).astype(int))
+    flag_theta = p_test >= theta
+
+    pos = (
+        test.select("CERT", "REPDTE", "target_fail_4q", "texas_ratio", "eq_asset_ratio", "brokered_dep_ratio")
+        .with_columns(
+            pl.Series("p", p_test),
+            pl.Series("flag_theta", flag_theta),
+            pl.Series("flag_top1", flag_top1),
+            pl.Series("flag_top2", flag_top2),
+        )
+        .filter(pl.col("target_fail_4q") == 1)
+    )
+
+    per_bank = pos.group_by("CERT").agg(
+        pl.col("REPDTE").min().alias("min_pos_q"),
+        pl.col("REPDTE").max().alias("max_pos_q"),
+        pl.len().alias("pit_quarters"),
+        pl.col("p").max().alias("max_prob"),
+        pl.col("flag_theta").any().alias("caught_theta"),
+        pl.col("flag_top1").any().alias("caught_top_1pct"),
+        pl.col("flag_top2").any().alias("caught_top_2pct"),
+        pl.col("REPDTE").filter(pl.col("flag_theta")).min().alias("first_alarm_theta"),
+        pl.col("REPDTE").filter(pl.col("flag_top1")).min().alias("first_alarm_top1"),
+        pl.col("texas_ratio").max().alias("max_texas_ratio"),
+        (pl.col("eq_asset_ratio").min() * 100.0).alias("min_eq_asset_pct"),
+        (pl.col("brokered_dep_ratio").max() * 100.0).alias("max_brokered_dep_pct"),
+    )
+
+    fail_meta = (
+        parse_failures()
+        .filter(pl.col("CERT").is_not_null() & pl.col("FAILDATE").is_not_null() & (pl.col("RESTYPE") == "FAILURE"))
+        .sort(["CERT", "FAILDATE"])
+        .group_by("CERT", maintain_order=True)
+        .agg(
+            pl.col("NAME").first().alias("bank_name"),
+            pl.col("CITYST").first().alias("city_state"),
+            pl.col("FAILDATE").first().alias("fail_date"),
+            pl.col("QBFASSET").first().alias("qbf_asset_kusd"),
+            pl.col("COST").first().fill_null(0.0).alias("dif_cost_kusd"),
+        )
+    )
+
+    joined = (
+        per_bank.join(fail_meta, on="CERT", how="inner")
+        .with_columns(
+            pl.when(pl.col("fail_date").dt.year() <= 2014)
+            .then(pl.lit("GFC (2009-2014)"))
+            .otherwise(pl.lit("Modern (2015-2025)"))
+            .alias("regime"),
+            (pl.col("fail_date") - pl.col("first_alarm_theta")).dt.total_days().alias("lead_days_theta"),
+            (pl.col("fail_date") - pl.col("first_alarm_top1")).dt.total_days().alias("lead_days_top1"),
+            (pl.col("qbf_asset_kusd") / 1000.0).round(1).alias("assets_musd"),
+            (pl.col("dif_cost_kusd") / 1000.0).round(1).alias("dif_cost_musd"),
+            pl.col("max_prob").round(4),
+            pl.col("max_texas_ratio").round(3),
+            pl.col("min_eq_asset_pct").round(2),
+            pl.col("max_brokered_dep_pct").round(2),
+        )
+    )
+
+    gfc_top = joined.filter(pl.col("regime") == "GFC (2009-2014)").sort("qbf_asset_kusd", descending=True).head(top_gfc)
+    mod_top = joined.filter(pl.col("regime") == "Modern (2015-2025)").sort("qbf_asset_kusd", descending=True).head(top_modern)
+
+    out = (
+        pl.concat([gfc_top, mod_top])
+        .with_columns(
+            pl.col("first_alarm_theta").dt.strftime("%Y-%m-%d").fill_null("NOT_FLAGGED"),
+            pl.col("first_alarm_top1").dt.strftime("%Y-%m-%d").fill_null("NOT_FLAGGED"),
+            pl.col("fail_date").dt.strftime("%Y-%m-%d"),
+            pl.col("min_pos_q").dt.strftime("%Y-%m-%d"),
+            pl.col("max_pos_q").dt.strftime("%Y-%m-%d"),
+        )
+        .select([
+            "CERT",
+            "bank_name",
+            "city_state",
+            "regime",
+            "fail_date",
+            "assets_musd",
+            "dif_cost_musd",
+            "pit_quarters",
+            "max_prob",
+            "caught_theta",
+            "first_alarm_theta",
+            "lead_days_theta",
+            "caught_top_1pct",
+            "first_alarm_top1",
+            "lead_days_top1",
+            "caught_top_2pct",
+            "max_texas_ratio",
+            "min_eq_asset_pct",
+            "max_brokered_dep_pct",
+        ])
+    )
+    return out
 
 
 def summarize_flag_rule(df: pl.DataFrame, p: np.ndarray, flag: np.ndarray) -> dict[str, Any]:
@@ -351,12 +610,20 @@ def execute_full_modeling_workflow(gold_path: Path | None = None) -> dict[str, A
         "HistGradientBoosting, 26 CAMELS": (FEATURE_COLS_CAMELS, "hgb"),
     }
     cv, champion_oof = {}, None
+    logit_explain: list[dict[str, Any]] = []
+    hgb_explain: list[dict[str, Any]] = []
     for name, (feats, kind) in candidates.items():
         log.info(f"Walk-forward CV: {name}")
-        folds, oof = run_walk_forward_cv(dev, feats, kind)
+        acc = logit_explain if name == "Logistic, 26 CAMELS" else (hgb_explain if name == "HistGradientBoosting, 26 CAMELS" else None)
+        folds, oof = run_walk_forward_cv(dev, feats, kind, explain_acc=acc)
         cv[name] = {**evaluate_predictions(oof["y"], oof["p"]), "folds": folds}
         if name == "HistGradientBoosting, 26 CAMELS":
             champion_oof = oof
+
+    feat_imp_df = summarize_dev_feature_importance(FEATURE_COLS_CAMELS, hgb_explain, logit_explain)
+    feat_imp_csv = out_dir("tables") / "feature_importance.csv"
+    feat_imp_df.write_csv(feat_imp_csv)
+    log.info(f"Saved strictly DEV walk-forward feature importance to {feat_imp_csv}")
 
     # ---- cost-based alarm threshold, decided on development out-of-fold predictions only -------------------------
     loss_rate = resolution_loss_rate()
@@ -407,6 +674,13 @@ def execute_full_modeling_workflow(gold_path: Path | None = None) -> dict[str, A
     years = test["REPDTE"].dt.year().to_numpy()
     gfc, modern = (years <= 2014), (years >= 2015)
     dev_all_failing = int(dev.filter(pl.col("target_fail_4q") == 1)["CERT"].n_unique())
+
+    canary_df = extract_canary_case_studies(test, p_test, theta)
+    canary_csv = out_dir("tables") / "canary_case_studies.csv"
+    canary_df.write_csv(canary_csv)
+    log.info(f"Saved post-hoc Canary case studies ({canary_df.height} banks) to {canary_csv}")
+
+    top_k = int(cfg().get("explainability", {}).get("top_k", 10))
     test_eval = {
         **evaluate_predictions(y_test, p_test),
         "texas_rule": evaluate_predictions(y_test, p_texas),
@@ -426,9 +700,11 @@ def execute_full_modeling_workflow(gold_path: Path | None = None) -> dict[str, A
         "dev_failing_banks_total": dev_all_failing,
         "dev_failing_banks_all": dev_all_failing,
         "dev_failing_banks_in_oof_blocks": cm.n_banks,
+        "canary_case_studies": canary_df.to_dicts(),
     }
     results = {
         "cross_validation_models": cv,
+        "feature_importance_top10": feat_imp_df.head(top_k).to_dicts(),
         "cost_threshold_tuning": {
             "resolution_loss_rate": round(loss_rate, 4),
             "false_alarm_cost_kusd": fp_cost,

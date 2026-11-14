@@ -35,6 +35,15 @@ cost:
   episode_cost: true
   asset_cap_quantile: 0.85
 
+explainability:
+  perm_repeats: 5
+  max_neg_per_fold: 25000
+  top_k: 10
+
+case_studies:
+  top_gfc: 5
+  top_modern: 5
+
 spark:
   master: "local[2]"
   driver_memory: "1200m"

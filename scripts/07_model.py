@@ -153,6 +153,39 @@ def plot_operating_points(results: dict):
     log.info(f"Saved operating points figure to {out_fig}")
 
 
+def plot_feature_importance(results: dict):
+    """Plot Top 10 DEV walk-forward permutation importance colored by Logistic directionality."""
+    top10 = results["feature_importance_top10"]
+    top10_rev = list(reversed(top10))
+
+    labels = [f"{r['feature']} ({r['camels_dim'].split(' - ')[0]})" for r in top10_rev]
+    vals = [r["hgb_perm_pr_auc"] for r in top10_rev]
+    stds = [r["hgb_perm_std"] for r in top10_rev]
+    colors = ["#d9534f" if r["logit_std_coef"] > 0 else "#2b8cbe" for r in top10_rev]
+
+    fig, ax = plt.subplots(figsize=(8.2, 4.2))
+    y_pos = range(len(labels))
+    ax.barh(list(y_pos), vals, xerr=stds, color=colors, alpha=0.9, capsize=3)
+    ax.set_yticks(list(y_pos))
+    ax.set_yticklabels(labels, fontsize=9)
+    ax.set_xlabel("DEV Walk-Forward Permutation Importance (Δ PR-AUC)")
+    ax.set_title("Top 10 CAMELS Risk Drivers (Leak-Free DEV CV, HGB + Logit Sign)")
+    ax.grid(True, axis="x", alpha=0.3)
+
+    from matplotlib.patches import Patch
+    legend_handles = [
+        Patch(facecolor="#d9534f", label="Logit β > 0 (+ Failure Risk)"),
+        Patch(facecolor="#2b8cbe", label="Logit β < 0 (− Protective Buffer)"),
+    ]
+    ax.legend(handles=legend_handles, loc="lower right", fontsize=8.5)
+
+    plt.tight_layout()
+    out_fig = out_dir("figures") / "feature_importance.png"
+    plt.savefig(out_fig, dpi=200)
+    plt.close()
+    log.info(f"Saved feature importance figure to {out_fig}")
+
+
 def main():
     log.info("Starting Part 5: Full Modeling, Cross-Validation & Test Evaluation...")
     results = execute_full_modeling_workflow()
@@ -181,10 +214,15 @@ def main():
     log.info(f"Optimal Threshold: {t_eval['threshold']}")
     log.info(f"At Threshold: {t_eval['at_threshold']}")
     log.info(f"Capacity Operating Points: {t_eval['capacity_points']}")
+    log.info("Top 10 DEV Features:")
+    print(pl.DataFrame(results["feature_importance_top10"]))
+    log.info("Post-hoc Canary Case Studies on TEST:")
+    print(pl.DataFrame(t_eval["canary_case_studies"]))
 
     plot_model_curves(results)
     plot_crisis_breakdown(results)
     plot_operating_points(results)
+    plot_feature_importance(results)
     log.info("Part 5 complete.")
 
 
