@@ -82,14 +82,14 @@ final/
 │   └── 05_modelling_and_validation.ipynb
 ├── outputs/                           # Committed empirical outputs (tables, figures, DQ report)
 │   ├── dq_report/data_quality_report.md
-│   ├── figures/                       # 6 high-resolution PNG figures (200 DPI)
-│   └── tables/                        # Benchmark CSVs, query plans, parity JSON, test_results.json, run_all_timing.txt
+│   ├── figures/                       # 7 high-resolution PNG figures (200 DPI)
+│   └── tables/                        # Benchmark CSVs, plans, parity JSON, feature_importance, canary_case_studies, test_results, run_all_timing.txt
 ├── report/                            # Final Research Report deliverables
 │   ├── report.md                      # Full English report in GitHub Markdown
 │   ├── BFT65B_Final_Report.docx       # Formatted Word document with embedded tables and figures
 │   └── BFT65B_Final_Report.pdf        # Final PDF report (<= 20 pages)
 └── tests/
-    └── test_pipeline.py               # Automated pytest suite (8 tests: completeness, de-YTD, leak-free, parity, threshold, capacity)
+    └── test_pipeline.py               # Automated pytest suite (11 tests: completeness, de-YTD, leak-free, parity, threshold, capacity, explainability, PDF pages)
 ```
 
 > **Note on Data Files:** Per course submission rules, `data/` (`bronze/`, `silver/`, `gold/`) and `*.parquet` files are excluded via `.gitignore` and are not committed to Git.
@@ -132,7 +132,7 @@ This script runs Steps `00` through `09`, logs per-step wall-clock times to `out
 * **Step 7 (`07_model.py`):** Runs 5-fold expanding walk-forward CV on `DEV` (`760,559` OOF rows, `1,522` OOF failing banks; `2,661` total `DEV` failing banks), calibrates the prior-odds cost-optimal threshold ($\theta^* = 0.0026$), computes fixed-capacity operating points (`Top 1%`, `2%`, `5%`), and evaluates on `TEST`.
 * **Step 8 (`08_build_notebooks_and_report.py`):** Executes `notebooks/*.ipynb` via `nbclient` and regenerates `report/BFT65B_Final_Report.docx` and `.pdf`.
 * **Step 9 (`09_check_report_numbers.py`):** Verifies that all key metrics in `report/report.md` and `README.md` match the generated JSON/CSV files.
-* **Tests (`pytest tests/`):** Runs 8 automated unit/integration tests verifying manifest completeness, YTD de-cumulation, strict point-in-time leak-free invariance, merger censoring, Polars–PySpark parity, non-degenerate cost threshold, capacity operating points, and test metrics.
+* **Tests (`pytest tests/`):** Runs 11 automated unit/integration tests verifying manifest completeness, YTD de-cumulation, strict point-in-time leak-free invariance, merger censoring, Polars–PySpark parity, non-degenerate cost threshold, capacity operating points, DEV feature importance & Canary case studies, and the 20-page PDF limit.
 
 ---
 
@@ -144,7 +144,7 @@ This script runs Steps `00` through `09`, logs per-step wall-clock times to `out
 | **Part 2: Quality & Panel** | Resolves 14-column schema drift, pre-2001 `P3ASSET` structural missingness, pre-1990 Basel zeroes (`18.13%`), and YTD cumulative flows; classifies `16,892` merged banks as right-censored ($y=0$) vs. `2,859` failed banks and `4,313` active banks. Excludes 59.1% non-scorable final quarters (`pit_scorable=False`). |
 | **Part 3: Processing** | On the full `1.68M`-row panel, **Polars Streaming** is fastest overall at **0.581 s** (RSS: **992 MB**), **Pandas + pushdown** finishes in **0.613 s** (RSS: **1,039 MB**), and **Polars Lazy** achieves the lowest memory footprint at **691 MB** (**1.271 s**) vs. **Pandas Naive** **1.353 s** (**1,947 MB** RSS, 2.8x higher RAM). Local **PySpark** matches Polars with **$2.24 \times 10^{-15}$ precision match** and identical row counts across 43 years. |
 | **Part 4: Features** | 26 point-in-time CAMELS + Texas Ratio + 4Q lag features; zero look-ahead verified by automated truncation invariance test (`test_leak_free_property`). |
-| **Part 5: Modelling** | Walk-forward CV PR-AUC (`760,559` OOF rows, `1,522` OOF failing banks): `HistGradientBoosting, 26 CAMELS` (**0.4699**, Brier **0.00337**) > `Logistic, 3 variables` (**0.4015**) > `Logistic, 26 CAMELS` (**0.3632**) > `Texas ratio rule` (**0.2642**). Held-out `TEST` (`2009Q1–2025Q2`, `400,332` rows, `485` failing banks): **PR-AUC = 0.5541**, **ROC-AUC = 0.9845**, **Brier = 0.00238**, **Recall@Top-1% = 82.75%**, **Recall@Top-5% = 95.46%**. Under fixed quarterly capacity **Top 1%/qtr**, catches **82.68%** of failing banks (`401 / 485`, precision **20.98%**, median lead **206 days**). At the prior-odds calibrated cost-optimal threshold $\theta^* = 0.0026$ ($C_{\text{FP}}=\$250\text{k}$ per episode), flags **3.657%** of test rows (`82.5` median alerts/qtr) and captures **97.11%** of failing banks (`471 / 485`) with **297.0 days** median lead time. Spark MLlib demo Development ROC-AUC = **0.9399**. |
+| **Part 5: Modelling** | Walk-forward CV PR-AUC (`760,559` OOF rows, `1,522` OOF failing banks): `HistGradientBoosting, 26 CAMELS` (**0.4699**, Brier **0.00337**) > `Logistic, 3 variables` (**0.4015**) > `Logistic, 26 CAMELS` (**0.3632**) > `Texas ratio rule` (**0.2642**). Held-out `TEST` (`2009Q1–2025Q2`, `400,332` rows, `485` failing banks): **PR-AUC = 0.5541**, **ROC-AUC = 0.9845**, **Brier = 0.00238**, **Recall@Top-1% = 82.75%**, **Recall@Top-5% = 95.46%**. Top strictly-`DEV` risk drivers (`feature_importance.csv`): **`texas_ratio`** (`+0.25172` $\Delta\text{PR-AUC}$), **`d4_eq_ratio`** (`+0.07781`), **`eq_asset_ratio`** (`+0.07514`). Post-hoc **Canary Case Studies** (`canary_case_studies.csv`): catches **5/5 top GFC closures** (`129–304 days` early, including *Colonial Bank*, *Guaranty Bank*, *AmTrust Bank*) plus *Doral Bank* (`333 d`) & *Republic Bank* (`301 d`), while transparently illustrating why 2023 uninsured-deposit runs (*SVB*, *Signature*, *First Republic*, Texas Ratio `0.008–0.028`) sit outside a 1984–2026 credit-CAMELS schema. At cost-optimal $\theta^* = 0.0026$ ($C_{\text{FP}}=\$250\text{k}$/episode), flags **3.657%** of test rows (`82.5` median alerts/qtr) and captures **97.11%** of failing banks (`471 / 485`) with **297.0 days** median lead time; **Top 1%/qtr** catches **82.68%** (`401 / 485`, precision **20.98%**, lead **206 days**). Spark MLlib DEV ROC-AUC = **0.9399**. |
 
 ---
 
@@ -156,8 +156,13 @@ This script runs Steps `00` through `09`, logs per-step wall-clock times to `out
    * Wheelock, D. C., & Wilson, P. W. (2000). *Why do banks disappear? The determinants of U.S. bank failures and acquisitions.* Review of Economics and Statistics, 82(1), 127–138.  
    * Shumway, T. (2001). *Forecasting bankruptcy more accurately: A simple hazard model.* The Journal of Business, 74(1), 101–124.  
    * Cole, R. A., & White, L. J. (2012). *Déjà vu all over again: The causes of U.S. commercial bank failures this time around.* Journal of Financial Services Research, 42(1), 5–29.
-3. **External Code & Reference Repositories:**  
-   * Isik, B. (2026). *`batuhanisik751/bank-failure-early-warning`: Open, reproducible early-warning system for US bank failures built on FDIC Call Report data* (MIT License, `https://github.com/batuhanisik751/bank-failure-early-warning`). Consulted for domain feature concepts (Texas Ratio baseline and walk-forward validation structure). All Polars, PySpark, storage benchmarking, and scikit-learn pipeline implementations in this repository were written independently for the BFT65B rubric.  
-   * Li, Z. *`zekaili/bank-loan-failure-prediction`* (`https://www.kaggle.com/code/zekaili/bank-loan-failure-prediction`). Evaluated during planning; focuses on consumer transaction loan default rather than institutional bank failure and was not used.
+3. **External Code & Reference Repositories (Cited & Critically Improved):**  
+   * `batuhanisik751/bank-failure-early-warning` ([GitHub](https://github.com/batuhanisik751/bank-failure-early-warning)): Consulted for CAMELS/Texas Ratio baseline and walk-forward cost intuition; upgraded to Bronze/Silver/Gold Polars + PySpark, Elkan prior-odds calibration, episode cost, and capacity budgets.  
+   * `Tajaddin/bank-early-warning` ([GitHub](https://github.com/Tajaddin/bank-early-warning)): R/SQL supervisory econometrics inspiration; upgraded to 1.68M-row Polars/Spark processing with HGB permutation importance paired with standardized Logit directionality.  
+   * `vfabuluje/Canary` ([GitHub](https://github.com/vfabuluje/Canary)): Inspired *"Canary in the coal mine"* individual-bank tracking via our `canary_case_studies.csv` post-hoc analysis of top GFC & Modern receiverships.  
+   * `martinogie/bank-health-data-platform` ([GitHub](https://github.com/martinogie/bank-health-data-platform)) & `saivardhan13-MSV/fdic-bank-health-pipeline` ([GitHub](https://github.com/saivardhan13-MSV/fdic-bank-health-pipeline)): Medallion/ETL engineering inspirations; extended with PyArrow Hive Zstd compression benchmarks, 42-year era-missingness audit, merger censoring, and Spark parity checks.  
+   * `heltonwo/fdic-failed-banks-etl` ([GitHub](https://github.com/heltonwo/fdic-failed-banks-etl)): Evaluated; limited to failures-only ETL (survivorship bias), whereas our panel includes all `24,064` active/merged/failed FDIC institutions.  
+   * `Zahivc/Bank-Bankruptcy-Predictions` ([GitHub](https://github.com/Zahivc/Bank-Bankruptcy-Predictions)): Evaluated; avoided its **SMOTE + random split** approach (which introduces temporal leakage) in favor of strict walk-forward splits and Bayes prior-odds calibration.  
+   * `zekaili/bank-loan-failure-prediction` ([Kaggle](https://www.kaggle.com/code/zekaili/bank-loan-failure-prediction)): Addresses retail consumer loans rather than institutional bank failures; not used.
 4. **AI Tools Disclosure:**  
    Google Antigravity AI coding assistant was utilized for code structuring, PySpark/Polars syntax optimization, and report formatting. All data processing steps, benchmarks, and statistical results were executed and verified locally on the FDIC dataset.

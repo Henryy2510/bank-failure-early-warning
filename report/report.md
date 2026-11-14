@@ -277,6 +277,44 @@ Scoring the `DEV`-trained Champion `HistGradientBoosting` pipeline on the `400,3
 
 ![Held-Out Test Set Performance Across Crisis Regimes](../outputs/figures/test_crisis_subperiods.png)
 
+### 6.5 Supervisory Explainability: Top 10 CAMELS Risk Drivers (`DEV` Walk-Forward OOF)
+To satisfy supervisory explainability without peeking at `TEST`, we compute inverse-probability weighted **permutation importance** ($\Delta\text{PR-AUC}$) across the 5 `DEV` walk-forward folds for Champion `HistGradientBoosting` paired with fold-averaged standardized coefficients $\hat{\beta}$ from `Logistic, 26 CAMELS` (`outputs/tables/feature_importance.csv`):
+
+| Rank | Feature (`CAMELS` Dimension) | HGB Perm. Importance ($\Delta\text{PR-AUC} \pm \text{SD}$) | Logit Std. Coef. ($\hat{\beta}$) | Econometric Direction |
+| :---: | :--- | :---: | :---: | :--- |
+| `1` | **`texas_ratio`** (`A - Asset Quality`) | **`0.25172` $\pm$ `0.00818`** | `+0.0603` | `+ Increase Risk` |
+| `2` | **`d4_eq_ratio`** (`Size & Dynamics`) | **`0.07781` $\pm$ `0.00738`** | `-0.1655` | `- Reduce Risk` |
+| `3` | **`eq_asset_ratio`** (`C - Capital`) | **`0.07514` $\pm$ `0.01013`** | `-1.1562` | `- Reduce Risk` |
+| `4` | `rbc1aaj_clean` (`C - Capital`) | `0.02827` $\pm$ `0.00589` | `-0.7828` | `- Reduce Risk` |
+| `5` | `roa_ytd` (`E - Earnings`) | `0.02357` $\pm$ `0.00204` | `-0.0239` | `- Reduce Risk` |
+| `6` | `brokered_dep_ratio` (`L - Liquidity`) | `0.01333` $\pm$ `0.00116` | `+0.2243` | `+ Increase Risk` |
+| `7` | `naasset_ratio` (`A - Asset Quality`) | `0.01167` $\pm$ `0.00153` | `+0.0982` | `+ Increase Risk` |
+| `8` | `nimy_clean` (`E - Earnings`) | `0.00924` $\pm$ `0.00157` | `-0.1248` | `- Reduce Risk` |
+| `9` | `rbcrwaj_clean` (`C - Capital`) | `0.00786` $\pm$ `0.00263` | `-0.1001` | `- Reduce Risk` |
+| `10` | `ore_ratio` (`A - Asset Quality`) | `0.00745` $\pm$ `0.00197` | `+0.2292` | `+ Increase Risk` |
+
+Insolvency risk is overwhelmingly driven by the interaction of **bad-asset overhang (`texas_ratio`, `naasset_ratio`, `ore_ratio`)**, **capital depletion velocity & thin equity buffers (`d4_eq_ratio`, `eq_asset_ratio`, `rbc1aaj_clean`)**, **weak earnings (`roa_ytd`, `nimy_clean`)**, and **reliance on hot wholesale funding (`brokered_dep_ratio`)**.
+
+![Top 10 CAMELS Risk Drivers (DEV Walk-Forward Permutation Importance)](../outputs/figures/feature_importance.png)
+
+### 6.6 Historical "Canary" Case Studies on Major Held-Out `TEST` Failures
+As a purely post-hoc diagnostic on frozen `TEST` scores (`outputs/tables/canary_case_studies.csv`), Table 6.6 inspects the 5 largest FDIC receivership closures (`RESTYPE == FAILURE`) by asset size (`QBFASSET`) in `GFC (2009–2014)` and `Modern (2015–2025)`:
+
+| Bank Name (`CERT`, State) | Regime / Failure Date | Assets (`$M`) | Peak $\hat{p}$ (`4Q`) | Flagged at $\theta^*$? (`Lead Days`) | Flagged Top 1%? (`Lead Days`) | Peak Texas Ratio / Min Eq% / Max Bro% |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Colonial Bank** (`9609`, AL) | `GFC` / `2009-08-14` | `$25,455.1` | `0.0145` | **Yes** (`2009-03-31`, **`136 d`**) | No | `0.572` / `5.60%` / `12.51%` |
+| **Guaranty Bank** (`32618`, TX) | `GFC` / `2009-08-21` | `$13,464.4` | `0.5483` | **Yes** (`2009-03-31`, **`143 d`**) | **Yes** (`143 d`) | `10.000` / `-5.60%` / `4.49%` |
+| **AmTrust Bank** (`29776`, OH) | `GFC` / `2009-12-04` | `$11,439.0` | `0.3519` | **Yes** (`2009-03-31`, **`248 d`**) | **Yes** (`157 d`) | `2.677` / `2.42%` / `4.11%` |
+| **United Commercial** (`32469`, CA) | `GFC` / `2009-11-06` | `$10,895.3` | `0.0252` | **Yes** (`2009-06-30`, **`129 d`**) | No | `0.569` / `9.30%` / `14.39%` |
+| **Westernbank PR** (`31027`, PR) | `GFC` / `2010-04-30` | `$10,797.3` | `0.0830` | **Yes** (`2009-06-30`, **`304 d`**) | No | `1.767` / `3.92%` / `75.65%` |
+| **First Republic Bank** (`59017`, CA) | `Modern` / `2023-05-01` | `$212,638.9` | `0.0001` | *No (`NOT_FLAGGED`)* | *No* | `0.008` / `8.20%` / `3.00%` |
+| **Silicon Valley Bank** (`24735`, CA) | `Modern` / `2023-03-10` | `$209,026.0` | `0.0001` | *No (`NOT_FLAGGED`)* | *No* | `0.009` / `6.69%` / `0.00%` |
+| **Signature Bank** (`57053`, NY) | `Modern` / `2023-03-12` | `$110,363.6` | `0.0002` | *No (`NOT_FLAGGED`)* | *No* | `0.028` / `6.71%` / `4.29%` |
+| **Doral Bank** (`32102`, PR) | `Modern` / `2015-02-27` | `$5,898.5` | `0.0587` | **Yes** (`2014-03-31`, **`333 d`**) | **Yes** (`242 d`) | `1.415` / `6.16%` / `25.44%` |
+| **Republic Bank** (`27332`, PA) | `Modern` / `2024-04-26` | `$5,866.2` | `0.0227` | **Yes** (`2023-06-30`, **`301 d`**) | **Yes** (`301 d`) | `0.198` / `1.34%` / `6.85%` |
+
+Every top-5 **GFC** credit-crisis closure was flagged immediately in early 2009 (**129–304 days** before receivership), alongside traditional post-GFC deteriorations such as **Doral Bank** (`333 d`) and **Republic Bank** in Philadelphia (`301 d`, flagged inside Top 1% when GAAP equity eroded to `1.34%`). Conversely, **Silicon Valley Bank**, **Signature Bank**, and **First Republic** posted pristine Texas Ratios (`0.008–0.028`) and healthy GAAP equity (`6.69%–8.20%`), failing via rapid uninsured deposit withdrawals (`DEPUNINS`) and unrealized HTM bond losses (`SCHA`/`SCHF`) omitted from the 1984–2026 uniform schema—cleanly explaining the GFC vs. 2023 regime shift noted in Section 7.1.
+
 ---
 
 ## 7. Part 6: Conclusions, Limitations & Adaptation for Vietnam [5 pts]
@@ -308,9 +346,20 @@ Deploying this early-warning pipeline at the **State Bank of Vietnam (SBV / Ngâ
    * Shumway, T. (2001). *Forecasting bankruptcy more accurately: A simple hazard model.* The Journal of Business, 74(1), 101–124.
    * Cole, R. A., & White, L. J. (2012). *Déjà vu all over again: The causes of U.S. commercial bank failures this time around.* Journal of Financial Services Research, 42(1), 5–29.
    * Elkan, C. (2001). *The foundations of cost-sensitive learning.* Proceedings of the 17th International Joint Conference on Artificial Intelligence (IJCAI), 973–978.
-3. **Open-Source Reference Repositories Consulted:**
-   * Isik, B. (2026). *`batuhanisik751/bank-failure-early-warning`: Open, reproducible early-warning system for US bank failures built on FDIC Call Report data* (MIT License, `https://github.com/batuhanisik751/bank-failure-early-warning`). Consulted for domain feature inspiration (Texas Ratio baseline and walk-forward validation concepts). All Polars, PySpark, storage benchmarking, and scikit-learn pipeline code in this repository was written independently from scratch to satisfy the BFT65B Big Data engineering rubric.
-   * Li, Z. *`zekaili/bank-loan-failure-prediction`* (Kaggle Notebook, `https://www.kaggle.com/code/zekaili/bank-loan-failure-prediction`). Reviewed and determined to address retail transaction loan defaults rather than institutional bank failures; not used in the pipeline.
+3. **Comparative Review of Related Open-Source Repositories Consulted:**  
+   Per academic integrity guidelines, all public FDIC-related repositories reviewed during research design are cited below alongside our methodological improvements:
+
+| Open-Source Reference | Focus & Domain Inspiration Drawn | Limitations Overcome in Our BFT65B Pipeline |
+| :--- | :--- | :--- |
+| [`batuhanisik751/bank-failure-early-warning`](https://github.com/batuhanisik751/bank-failure-early-warning) | Domain feature intuition (CAMELS, Texas Ratio baseline, walk-forward CV, FDIC cost logic). | Single-node Pandas only; our repo re-implements in Bronze/Silver/Gold **Polars + PySpark** (`1.68M` rows), adds `PriorOddsCalibrator`, episode cost, & fixed capacity rules. |
+| [`Tajaddin/bank-early-warning`](https://github.com/Tajaddin/bank-early-warning) | Classical R/SQL CAMELS econometrics, directional variable interpretation, out-of-time validation. | R script lacks columnar Parquet benchmarking & distributed Spark parity; we pair **HGB permutation importance** with standardized **Logit coefficients** over 42 years. |
+| [`vfabuluje/Canary`](https://github.com/vfabuluje/Canary) | *"Canary in the coal mine"* supervisory framing and case-level tracking of major bank stress. | Rule/liquidity dashboard without walk-forward ML calibration; we formalize **post-hoc Canary case studies** across GFC & Modern `TEST` failures (`lead_days_theta`). |
+| [`martinogie/bank-health-data-platform`](https://github.com/martinogie/bank-health-data-platform) | Medallion lakehouse conceptual inspiration for FDIC Call Report data engineering. | Engineering BI focus without 42-year schema-drift DQ audit, merger censoring, or forward failure ML; we close the full loop through `Gold` and Part 5. |
+| [`saivardhan13-MSV/fdic-bank-health-pipeline`](https://github.com/saivardhan13-MSV/fdic-bank-health-pipeline) | Cloud/ETL ingestion workflow patterns over FDIC financial metrics. | Lacks PyArrow Hive compression benchmarks, YTD flow de-cumulation tests, 60-day PIT lag enforcement, and Spark vs. Polars numerical parity verification. |
+| [`heltonwo/fdic-failed-banks-etl`](https://github.com/heltonwo/fdic-failed-banks-etl) | Lightweight ETL structure for FDIC historical `banklist` closure records. | Processes failures only (severe **survivorship/selection bias**); we link closures to `24,064` surviving/merged banks (`1.68M` rows) for unbiased risk estimation. |
+| [`Zahivc/Bank-Bankruptcy-Predictions`](https://github.com/Zahivc/Bank-Bankruptcy-Predictions) | ML/DL experimentation for bank bankruptcy classification on FDIC extracts. | Uses **SMOTE + random splits** (severe **temporal data leakage** & distorted priors); we preserve strict temporal splits and use **Elkan (2001) Bayes prior-odds calibration**. |
+| [`zekaili/bank-loan-failure-prediction`](https://www.kaggle.com/code/zekaili/bank-loan-failure-prediction) | Evaluated during early planning for binary credit classification workflows. | Targets retail consumer loan defaults rather than institutional bank Call Reports; excluded from pipeline implementation. |
+
 4. **AI Tool Disclosure:** Google Antigravity AI coding assistant was used for pair-programming pipeline modularization, debugging schema drift/PySpark configurations, and formatting documentation. All experimental designs, empirical measurements, and supervisory interpretations were verified against the local dataset.
 
 ### 8.2 End-to-End Reproducibility (`run_all.sh`)
