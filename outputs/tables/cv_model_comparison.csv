@@ -1,5 +1,5 @@
 model,pr_auc,roc_auc,recall_top_1pct,recall_top_5pct,brier_score
 Texas ratio rule,0.2642,0.9734,0.6665,0.929,0.00724
-"Logistic, 3 variables",0.4128,0.9793,0.7291,0.9566,0.01733
-"Logistic, 26 CAMELS",0.3743,0.9815,0.735,0.9431,0.01407
-"HistGradientBoosting, 26 CAMELS",0.5088,0.9863,0.7838,0.9549,0.01036
+"Logistic, 3 variables",0.4015,0.9786,0.7277,0.9566,0.00368
+"Logistic, 26 CAMELS",0.3632,0.9802,0.7319,0.9371,0.00391
+"HistGradientBoosting, 26 CAMELS",0.4699,0.9849,0.7753,0.9501,0.00337
