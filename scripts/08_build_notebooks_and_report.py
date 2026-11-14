@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -232,7 +233,11 @@ def build_notebooks():
                 "print('\\n=== Held-Out Test Capacity Operating Points ===')\n"
                 "print(pl.DataFrame(t_eval['capacity_points']))\n"
                 "print('\\n=== Held-Out Test at Cost-Optimal Threshold (theta* = 0.0026) ===')\n"
-                "print(t_eval['at_threshold'])",
+                "print(t_eval['at_threshold'])\n"
+                "print('\\n=== Top 10 Strictly-DEV Feature Importance (HGB Permutation + Logit Coef) ===')\n"
+                "print(pl.read_csv('../outputs/tables/feature_importance.csv').head(10))\n"
+                "print('\\n=== Post-hoc Historical Canary Case Studies (Held-Out TEST Failures) ===')\n"
+                "print(pl.read_csv('../outputs/tables/canary_case_studies.csv'))",
             ),
         ],
         nb_dir / "05_modelling_and_validation.ipynb",
@@ -256,6 +261,17 @@ def update_report_metadata() -> Path:
     return md_path
 
 
+def _clean_docx_text(s: str) -> str:
+    """Strip inline Markdown markers and expand HTTP links for crisp Word/PDF typesetting."""
+    s = s.replace("**", "").replace("`", "").replace("<br>", "\n").replace("$\\rightarrow$", "->")
+    s = re.sub(
+        r"\[([^\]]+)\]\((https?://[^)]+)\)",
+        lambda m: m.group(2) if m.group(1) in m.group(2) else f"{m.group(1)} ({m.group(2)})",
+        s,
+    )
+    return s
+
+
 def build_docx_report(md_path: Path) -> Path:
     """Convert the Markdown report into a formatted Word (.docx) document with embedded figures and tables."""
     from docx import Document
@@ -267,17 +283,17 @@ def build_docx_report(md_path: Path) -> Path:
 
     # Set margins
     for section in doc.sections:
-        section.top_margin = Inches(0.75)
-        section.bottom_margin = Inches(0.75)
-        section.left_margin = Inches(0.75)
-        section.right_margin = Inches(0.75)
+        section.top_margin = Inches(0.65)
+        section.bottom_margin = Inches(0.65)
+        section.left_margin = Inches(0.65)
+        section.right_margin = Inches(0.65)
 
     # Set default font
     style = doc.styles["Normal"]
     style.font.name = "Calibri"
-    style.font.size = Pt(10)
-    style.paragraph_format.space_after = Pt(3)
-    style.paragraph_format.line_spacing = 1.15
+    style.font.size = Pt(9.5)
+    style.paragraph_format.space_after = Pt(2)
+    style.paragraph_format.line_spacing = 1.08
 
     lines = md_path.read_text(encoding="utf-8").splitlines()
     i = 0
@@ -319,12 +335,12 @@ def build_docx_report(md_path: Path) -> Path:
             if img_p.exists():
                 p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                p.add_run().add_picture(str(img_p), width=Inches(5.2))
+                p.add_run().add_picture(str(img_p), width=Inches(4.7))
                 cap_p = doc.add_paragraph(f"Figure: {caption}")
                 cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 cap_p.runs[0].italic = True
-                cap_p.runs[0].font.size = Pt(9.0)
-                cap_p.paragraph_format.space_after = Pt(4)
+                cap_p.runs[0].font.size = Pt(8.5)
+                cap_p.paragraph_format.space_after = Pt(3)
             i += 1
             continue
 
@@ -339,7 +355,7 @@ def build_docx_report(md_path: Path) -> Path:
             for idx, tl in enumerate(tbl_lines):
                 if idx == 1 and ("---" in tl or ":---" in tl):
                     continue
-                cells = [c.strip().replace("**", "").replace("`", "").replace("<br>", "\n") for c in tl.strip("|").split("|")]
+                cells = [_clean_docx_text(c.strip()) for c in tl.strip("|").split("|")]
                 rows_parsed.append(cells)
             if rows_parsed:
                 n_cols = max(len(r) for r in rows_parsed)
@@ -352,11 +368,16 @@ def build_docx_report(md_path: Path) -> Path:
                             cell = table.cell(r_idx, c_idx)
                             cell.text = val
                             for p in cell.paragraphs:
+                                p.paragraph_format.space_after = Pt(1)
+                                p.paragraph_format.line_spacing = 1.02
                                 for run in p.runs:
-                                    run.font.size = Pt(8.5)
+                                    run.font.size = Pt(8.0)
                                     if r_idx == 0:
                                         run.bold = True
-                doc.add_paragraph()
+                spacer = doc.add_paragraph()
+                spacer.paragraph_format.space_before = Pt(0)
+                spacer.paragraph_format.space_after = Pt(2)
+                spacer.paragraph_format.line_spacing = 1.0
             continue
 
         # Headings
@@ -368,14 +389,14 @@ def build_docx_report(md_path: Path) -> Path:
         elif line.startswith("### "):
             doc.add_heading(line[4:].strip(), level=2)
         elif line.startswith("* ") or line.startswith("- ") or line.lstrip().startswith("* "):
-            clean_txt = line.lstrip().lstrip("*- ").replace("**", "").replace("`", "")
+            clean_txt = _clean_docx_text(line.lstrip().lstrip("*- "))
             doc.add_paragraph(clean_txt, style="List Bullet")
         elif line.startswith("> "):
-            clean_txt = line[2:].strip().replace("**", "").replace("`", "")
+            clean_txt = _clean_docx_text(line[2:].strip())
             p = doc.add_paragraph(clean_txt)
             p.runs[0].italic = True
         elif line.strip():
-            clean_txt = line.strip().replace("**", "").replace("`", "")
+            clean_txt = _clean_docx_text(line.strip())
             doc.add_paragraph(clean_txt)
 
         i += 1

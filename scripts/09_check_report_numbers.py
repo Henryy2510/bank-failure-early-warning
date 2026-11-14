@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -22,6 +24,8 @@ def main() -> None:
     exit_df = pl.read_csv(out_dir("tables") / "bank_exit_summary.csv")
     storage_df = pl.read_csv(out_dir("tables") / "part1_storage_benchmark.csv")
     bench_df = pl.read_csv(out_dir("tables") / "part3_benchmark_results.csv")
+    feat_imp_df = pl.read_csv(out_dir("tables") / "feature_importance.csv")
+    canary_df = pl.read_csv(out_dir("tables") / "canary_case_studies.csv")
     full_bench = {
         r["engine"]: r
         for r in bench_df.filter(pl.col("slice") == "1984-2026 (full)").iter_rows(named=True)
@@ -61,9 +65,37 @@ def main() -> None:
     for row in exit_df.iter_rows(named=True):
         required_in_report.append(f"{int(row['banks']):,}")
 
+    for row in feat_imp_df.head(3).iter_rows(named=True):
+        required_in_report.append(row["feature"])
+        required_in_report.append(f"{row['hgb_perm_pr_auc']:.5f}")
+        required_in_report.append(f"{row['logit_std_coef']:+.4f}")
+
+    for row in canary_df.iter_rows(named=True):
+        if row["lead_days_theta"] is not None:
+            required_in_report.append(f"{int(row['lead_days_theta'])} d")
+
+    repo_handles = [
+        "batuhanisik751/bank-failure-early-warning",
+        "Tajaddin/bank-early-warning",
+        "martinogie/bank-health-data-platform",
+        "saivardhan13-MSV/fdic-bank-health-pipeline",
+        "vfabuluje/Canary",
+        "heltonwo/fdic-failed-banks-etl",
+        "Zahivc/Bank-Bankruptcy-Predictions",
+    ]
+    required_in_report.extend(repo_handles)
+
     missing_report = [tok for tok in required_in_report if tok not in report_txt]
     if missing_report:
         raise AssertionError(f"Missing expected tokens in report/report.md: {missing_report}")
+
+    report_lower = report_txt.lower()
+    missing_banks = [
+        name for name in ["colonial bank", "guaranty bank", "silicon valley bank", "first republic bank", "doral bank", "republic bank"]
+        if name not in report_lower
+    ]
+    if missing_banks:
+        raise AssertionError(f"Missing Canary case-study bank names in report/report.md: {missing_banks}")
 
     # 2. Required exact strings in README.md
     required_in_readme = [
@@ -79,12 +111,26 @@ def main() -> None:
         "16,892",
         "4,313",
         f"{full_bench['pandas + pushdown']['time_s']:.3f} s",
+        *feat_imp_df.head(3)["feature"].to_list(),
+        *repo_handles,
     ]
     missing_readme = [tok for tok in required_in_readme if tok not in readme_txt]
     if missing_readme:
         raise AssertionError(f"Missing expected tokens in README.md: {missing_readme}")
 
-    # 3. Forbidden stale numbers in report.md and README.md
+    # 3. Verify compiled PDF exists and stays within the 20-page limit
+    pdf_path = ROOT / "report" / "BFT65B_Final_Report.pdf"
+    if not pdf_path.exists():
+        raise AssertionError(f"Missing compiled PDF: {pdf_path}")
+    info = subprocess.run(["pdfinfo", str(pdf_path)], check=True, capture_output=True, text=True).stdout
+    m = re.search(r"Pages:\s+(\d+)", info)
+    if not m:
+        raise AssertionError("Could not parse page count from pdfinfo output")
+    pages = int(m.group(1))
+    if pages > 20:
+        raise AssertionError(f"Compiled PDF exceeds 20-page limit: {pages} pages")
+
+    # 4. Forbidden stale numbers in report.md and README.md
     stale_tokens = [
         "0.3990",
         "0.6721",
@@ -104,7 +150,10 @@ def main() -> None:
     if stale_found:
         raise AssertionError(f"Found stale tokens in report.md or README.md: {stale_found}")
 
-    log.info("All report.md and README.md numbers verified against JSON/CSV outputs with zero stale tokens!")
+    log.info(
+        f"All report.md and README.md numbers verified against JSON/CSV outputs "
+        f"(PDF = {pages} pages <= 20) with zero stale tokens!"
+    )
 
 
 if __name__ == "__main__":

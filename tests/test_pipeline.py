@@ -196,3 +196,48 @@ def test_notebooks_executed_and_report_numbers_consistent():
     subprocess.run([sys.executable, str(ROOT / "scripts" / "09_check_report_numbers.py")], check=True)
 
 
+def test_feature_importance_and_canary_outputs():
+    """Verify strictly-DEV feature importance table and post-hoc Canary case studies CSV/JSON."""
+    import json
+    from src.bfews.features import FEATURE_COLS_CAMELS
+    from src.bfews.utils import out_dir
+
+    imp_path = out_dir("tables") / "feature_importance.csv"
+    canary_path = out_dir("tables") / "canary_case_studies.csv"
+    assert imp_path.exists() and canary_path.exists(), "Run 07_model.py first"
+
+    imp_df = pl.read_csv(imp_path)
+    assert imp_df.height == len(FEATURE_COLS_CAMELS)
+    assert set(imp_df["feature"].to_list()) == set(FEATURE_COLS_CAMELS)
+    assert imp_df["hgb_perm_pr_auc"].is_sorted(descending=True)
+    assert imp_df.filter(pl.col("in_top10")).height == 10
+    assert (out_dir("figures") / "feature_importance.png").exists()
+
+    canary_df = pl.read_csv(canary_path)
+    assert canary_df.height >= 8
+    regimes = set(canary_df["regime"].to_list())
+    assert "GFC (2009-2014)" in regimes and "Modern (2015-2025)" in regimes
+    caught = canary_df.filter(pl.col("caught_theta"))
+    assert caught.height >= 6
+    assert (caught["lead_days_theta"] > 0).all()
+
+    res = json.loads((out_dir("tables") / "test_results.json").read_text())
+    assert len(res["feature_importance_top10"]) == 10
+    assert len(res["held_out_test_evaluation"]["canary_case_studies"]) == canary_df.height
+
+
+def test_pdf_page_limit():
+    """Verify compiled PDF report exists and complies with the strict 20-page ceiling."""
+    import re
+    import subprocess
+    from src.bfews.utils import ROOT
+
+    pdf_path = ROOT / "report" / "BFT65B_Final_Report.pdf"
+    assert pdf_path.exists(), "Run 08_build_notebooks_and_report.py first"
+    out = subprocess.run(["pdfinfo", str(pdf_path)], check=True, capture_output=True, text=True).stdout
+    m = re.search(r"Pages:\s+(\d+)", out)
+    assert m is not None
+    pages = int(m.group(1))
+    assert 15 <= pages <= 20, f"Expected 15-20 pages, got {pages}"
+
+
