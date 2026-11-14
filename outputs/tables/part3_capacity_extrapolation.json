@@ -1,22 +1,22 @@
 {
-  "Polars lazy": {
-    "mb_per_million_rows": 242.0,
-    "seconds_per_million_rows": 0.744,
-    "rows_millions_until_16gb": 67.0
-  },
   "Polars eager": {
-    "mb_per_million_rows": 184.0,
-    "seconds_per_million_rows": 0.665,
-    "rows_millions_until_16gb": 87.0
-  },
-  "pandas + pushdown": {
-    "mb_per_million_rows": 401.0,
-    "seconds_per_million_rows": 0.247,
-    "rows_millions_until_16gb": 40.0
+    "mb_per_million_rows": 110.0,
+    "seconds_per_million_rows": 0.688,
+    "rows_millions_until_16gb": 144.0
   },
   "Polars streaming": {
-    "mb_per_million_rows": 661.0,
-    "seconds_per_million_rows": 0.321,
-    "rows_millions_until_16gb": 24.0
+    "mb_per_million_rows": 487.0,
+    "seconds_per_million_rows": 0.33,
+    "rows_millions_until_16gb": 33.0
+  },
+  "pandas + pushdown": {
+    "mb_per_million_rows": 405.0,
+    "seconds_per_million_rows": 0.23,
+    "rows_millions_until_16gb": 40.0
+  },
+  "Polars lazy": {
+    "mb_per_million_rows": 208.0,
+    "seconds_per_million_rows": 0.735,
+    "rows_millions_until_16gb": 77.0
   }
 }
