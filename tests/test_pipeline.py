@@ -141,3 +141,58 @@ def test_held_out_test_results():
     assert test_eval["roc_auc"] > 0.90
     assert test_eval["pr_auc"] > 0.50
 
+
+def test_threshold_not_degenerate():
+    """Verify that the cost-optimal threshold is strictly interior and sensitivity thresholds vary."""
+    import json
+    from src.bfews.utils import out_dir
+
+    res_file = out_dir("tables") / "test_results.json"
+    assert res_file.exists(), "Run 07_model.py first"
+    res = json.loads(res_file.read_text())
+    cost_opt = res["cost_threshold_tuning"]
+    assert not cost_opt["theta_at_grid_edge"], "Optimal theta hit the boundary of theta_grid!"
+    test_at = res["held_out_test_evaluation"]["at_threshold"]
+    assert test_at["flagged_share_of_rows_pct"] < 20.0
+    sens_thetas = [s["theta"] for s in cost_opt["sensitivity"].values()]
+    assert len(set(sens_thetas)) >= 2, "Sensitivity thresholds are all identical!"
+    assert cost_opt["dev_failing_banks_in_oof_blocks"] == 1522
+    assert cost_opt["dev_failing_banks_all"] == 2661
+
+
+def test_capacity_points_present():
+    """Verify that fixed-budget capacity operating points (top 1%, 2%, 5%) are computed."""
+    import json
+    from src.bfews.utils import out_dir
+
+    res_file = out_dir("tables") / "test_results.json"
+    assert res_file.exists(), "Run 07_model.py first"
+    res = json.loads(res_file.read_text())
+    cap = {p["pct"]: p for p in res["held_out_test_evaluation"]["capacity_points"]}
+    assert {1, 2, 5}.issubset(cap.keys())
+    assert cap[1]["bank_recall"] > 0.70
+    assert cap[5]["bank_recall"] > cap[1]["bank_recall"]
+
+
+def test_notebooks_executed_and_report_numbers_consistent():
+    """Verify all 5 notebooks have real nbclient execution metadata and report/README numbers match outputs."""
+    import nbformat
+    from src.bfews.utils import ROOT
+    import subprocess
+    import sys
+
+    nb_dir = ROOT / "notebooks"
+    nbs = sorted(nb_dir.glob("*.ipynb"))
+    assert len(nbs) == 5, f"Expected 5 notebooks, found {len(nbs)}"
+    for p in nbs:
+        nb = nbformat.read(p, as_version=4)
+        code_cells = [c for c in nb.cells if c.cell_type == "code"]
+        assert len(code_cells) >= 2
+        for c in code_cells:
+            assert c.execution_count is not None and c.execution_count >= 1
+            assert "execution" in c.metadata and "iopub.execute_input" in c.metadata["execution"]
+            assert len(c.outputs) >= 1
+
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "09_check_report_numbers.py")], check=True)
+
+
