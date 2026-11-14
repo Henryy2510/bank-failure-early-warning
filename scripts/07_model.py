@@ -99,6 +99,60 @@ def plot_crisis_breakdown(results: dict):
     log.info(f"Saved crisis subperiod figure to {out_fig}")
 
 
+def plot_operating_points(results: dict):
+    """Plot capacity-based vs cost-based operating points on held-out test set."""
+    t_res = results["held_out_test_evaluation"]
+    cap_by_pct = {p["pct"]: p for p in t_res["capacity_points"]}
+    cost_pt = t_res["at_threshold"]
+
+    labels = ["Top 1%/qtr", "Top 2%/qtr", f"Cost θ*={t_res['threshold']:.4f}", "Top 5%/qtr"]
+    pts = [cap_by_pct[1], cap_by_pct[2], cost_pt, cap_by_pct[5]]
+
+    bank_rec = [p["bank_recall"] for p in pts]
+    row_rec = [p["row_recall"] for p in pts]
+    prec = [p["precision_row"] for p in pts]
+    flagged_pct = [p["flagged_share_of_rows_pct"] for p in pts]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
+    x = range(len(labels))
+    width = 0.28
+
+    ax1.bar([i - width for i in x], bank_rec, width, label="Bank-Level Recall", color="#2b8cbe")
+    ax1.bar(list(x), row_rec, width, label="Quarter-Row Recall", color="#7bccc4")
+    ax1.bar([i + width for i in x], prec, width, label="Row Precision", color="#f0ad4e")
+    ax1.set_xticks(list(x))
+    ax1.set_xticklabels(labels, rotation=15, ha="right")
+    ax1.set_ylim(0, 1.08)
+    ax1.set_ylabel("Rate")
+    ax1.set_title("Held-Out Test Operating Points: Recall & Precision")
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(loc="lower right")
+
+    bars = ax2.bar(list(x), flagged_pct, width=0.45, color="#d9534f")
+    for b, p in zip(bars, pts):
+        caught = p.get("failing_banks_caught", p.get("banks_caught"))
+        ax2.text(
+            b.get_x() + b.get_width() / 2,
+            b.get_height() + 0.15,
+            f"{b.get_height():.2f}%\n({caught}/{p['failing_banks']} banks)",
+            ha="center",
+            va="bottom",
+            fontsize=8.5,
+        )
+    ax2.set_xticks(list(x))
+    ax2.set_xticklabels(labels, rotation=15, ha="right")
+    ax2.set_ylim(0, max(flagged_pct) * 1.30)
+    ax2.set_ylabel("Flagged Share of All Bank-Quarters (%)")
+    ax2.set_title("Supervisory Inspection Burden (% Flagged Rows)")
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    out_fig = out_dir("figures") / "operating_points.png"
+    plt.savefig(out_fig, dpi=200)
+    plt.close()
+    log.info(f"Saved operating points figure to {out_fig}")
+
+
 def main():
     log.info("Starting Part 5: Full Modeling, Cross-Validation & Test Evaluation...")
     results = execute_full_modeling_workflow()
@@ -126,9 +180,11 @@ def main():
     log.info(f"Overall Test PR-AUC: {t_eval['pr_auc']}, ROC-AUC: {t_eval['roc_auc']}")
     log.info(f"Optimal Threshold: {t_eval['threshold']}")
     log.info(f"At Threshold: {t_eval['at_threshold']}")
+    log.info(f"Capacity Operating Points: {t_eval['capacity_points']}")
 
     plot_model_curves(results)
     plot_crisis_breakdown(results)
+    plot_operating_points(results)
     log.info("Part 5 complete.")
 
 
