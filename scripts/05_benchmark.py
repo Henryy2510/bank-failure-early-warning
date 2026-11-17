@@ -1,13 +1,15 @@
-"""Part 3: Polars (eager / lazy / streaming) vs pandas (naive / pushdown) on identical work, on three panel sizes.
+"""Part 3: Multi-scale benchmark (1x..8x) comparing Polars (eager / lazy / streaming) vs pandas on identical work.
 
 Fairness rules
-* every engine runs the same six transformations (core.py) and materialises the full feature table;
-* every run is a fresh spawned process (median of REPEAT runs, warm page cache) so memory peaks are not shared;
-* all engines return a checksum of their output, and the benchmark fails if the engines disagree.
+* every engine runs the exact same six transformations (core.py) and materialises the full feature table;
+* every run is a fresh spawned process (median of REPEAT runs, warm page cache) so peak memory peaks are isolated;
+* every run verifies numeric parity against Polars lazy (max relative checksum difference <= 1e-6).
 """
 from __future__ import annotations
 
 import os
+import platform
+import shutil
 import sys
 from pathlib import Path
 
@@ -17,103 +19,184 @@ os.environ["POLARS_MAX_THREADS"] = "4"
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import polars as pl
+import psutil
 
 from src.bfews.core import CORE_COLS, checksum_pandas, checksum_polars, core_pandas, core_polars, max_rel_diff
 from src.bfews.io import bronze_financials_path
-from src.bfews.utils import get_logger, measure, out_dir, save_json
+from src.bfews.utils import available_memory_gb, data_dir, get_logger, measure, out_dir, save_json
 
 log = get_logger("05_benchmark")
 REPEAT = 3
-COLS = [c for c in CORE_COLS]  # columns the core needs
+COLS = list(CORE_COLS)
 
 
-def bench_polars(bronze_p: Path, min_year: int, mode: str) -> dict:
+def bench_polars(src_p: Path, mode: str) -> dict:
     if mode == "eager":
-        df = pl.read_parquet(bronze_p, columns=COLS + ["YEAR"], hive_partitioning=True).filter(pl.col("YEAR") >= min_year)
-        out = core_polars(df.drop("YEAR"))
+        df = pl.read_parquet(src_p, columns=COLS, hive_partitioning=True)
+        out = core_polars(df)
     else:
-        lf = (pl.scan_parquet(bronze_p, hive_partitioning=True).filter(pl.col("YEAR") >= min_year)
-              .select(COLS))
+        lf = pl.scan_parquet(src_p, hive_partitioning=True).select(COLS)
         out = core_polars(lf).collect(engine="streaming" if mode == "streaming" else "in-memory")
     return checksum_polars(out)
 
 
-def bench_pandas(bronze_p: Path, min_year: int, mode: str) -> dict:
-    import pandas as pd
+def bench_pandas(src_p: Path, mode: str) -> dict:
+    import pandas as pd_
 
-    if mode == "naive":  # read everything, filter afterwards (what most notebooks do)
-        df = pd.read_parquet(bronze_p)
-        df = df[df["YEAR"].astype(int) >= min_year][COLS]
-    else:  # pyarrow column projection + partition filter pushed into the reader
-        df = pd.read_parquet(bronze_p, columns=COLS, filters=[("YEAR", ">=", min_year)])
+    if mode == "naive":
+        df = pd_.read_parquet(src_p)[COLS]
+    else:
+        df = pd_.read_parquet(src_p, columns=COLS)
     return checksum_pandas(core_pandas(df))
 
 
+def build_scaled_parquet(bronze_p: Path, target_p: Path, scale: int) -> Path:
+    """Create a year-partitioned k-times scaled panel with disjoint synthetic CERT offsets in low memory."""
+    if scale == 1:
+        return bronze_p
+    shutil.rmtree(target_p, ignore_errors=True)
+    target_p.mkdir(parents=True, exist_ok=True)
+    for year_dir in sorted(bronze_p.glob("YEAR=*")):
+        df_y = pl.read_parquet(year_dir / "part-0.parquet", columns=COLS)
+        parts = [df_y.with_columns((pl.col("CERT") + r * 1_000_000).alias("CERT")) for r in range(scale)]
+        out_y = target_p / year_dir.name
+        out_y.mkdir(parents=True, exist_ok=True)
+        pl.concat(parts, how="vertical").sort(["REPDTE", "CERT"]).write_parquet(
+            out_y / "part-0.parquet", compression="zstd", compression_level=3, statistics=True, row_group_size=50_000
+        )
+    return target_p
+
+
 def capture_polars_plan(bronze_p: Path) -> str:
-    lf = (pl.scan_parquet(bronze_p, hive_partitioning=True)
-          .filter(pl.col("YEAR") >= 2008).select(COLS))
-    plan = core_polars(lf)
-    text = ["=== UNOPTIMIZED LOGICAL PLAN ===", plan.explain(optimized=False),
-            "\n=== OPTIMIZED PLAN ===", plan.explain(optimized=True)]
-    (out_dir("tables") / "polars_optimized_plan.txt").write_text("\n".join(text), encoding="utf-8")
-    return "\n".join(text)
+    """Compare naive unprojected scan vs optimized projection+partition-pruned query plan."""
+    naive_lf = core_polars(pl.scan_parquet(bronze_p, hive_partitioning=True)).filter(pl.col("year") >= 2008)
+    opt_lf = core_polars(
+        pl.scan_parquet(bronze_p, hive_partitioning=True).filter(pl.col("YEAR") >= 2008).select(COLS)
+    )
+    txt = "\n".join([
+        "=== NAIVE LOGICAL PLAN (UNPROJECTED, POST-CORE FILTER ON COMPUTED `year`) ===",
+        naive_lf.explain(optimized=False),
+        "\n=== OPTIMIZED POLARS LAZY PLAN (PARTITION PRUNING YEAR>=2008 + PROJECT 8/34) ===",
+        opt_lf.explain(optimized=True),
+    ])
+    (out_dir("tables") / "polars_naive_vs_optimized_plan.txt").write_text(txt, encoding="utf-8")
+    (out_dir("tables") / "polars_optimized_plan.txt").write_text(txt, encoding="utf-8")
+    return txt
+
+
+def save_benchmark_environment() -> dict:
+    env = {
+        "os": platform.platform(),
+        "python": platform.python_version(),
+        "cpu_physical": psutil.cpu_count(logical=False),
+        "cpu_logical": psutil.cpu_count(logical=True),
+        "ram_total_gb": round(psutil.virtual_memory().total / 1024**3, 2),
+        "ram_available_gb_at_start": round(available_memory_gb(), 2),
+        "polars": pl.__version__,
+        "pandas": pd.__version__,
+        "polars_max_threads": os.environ.get("POLARS_MAX_THREADS", "default"),
+    }
+    save_json(env, out_dir("tables") / "benchmark_environment.json")
+    return env
 
 
 def run(bronze_p: Path) -> pl.DataFrame:
-    slices = [("2010-2026", 2010), ("1995-2026", 1995), ("1984-2026 (full)", 1984)]
-    engines = [("Polars lazy", bench_polars, "lazy"), ("Polars streaming", bench_polars, "streaming"),
-               ("Polars eager", bench_polars, "eager"), ("pandas + pushdown", bench_pandas, "pushdown"),
-               ("pandas naive", bench_pandas, "naive")]
+    tmp_root = data_dir("bronze") / "_scale_tmp"
+    shutil.rmtree(tmp_root, ignore_errors=True)
     rows = []
-    for label, y in slices:
-        ref = None
-        for name, fn, mode in engines:
-            log.info(f"{label}: {name}")
-            m = measure(fn, bronze_p, y, mode, repeat=REPEAT)
-            chk = m["result"]
-            ref = ref or chk
-            diff = max_rel_diff(chk, ref)
-            if diff > 1e-6:
-                raise RuntimeError(f"engine outputs differ for {name} on {label}: {diff}")
-            rows.append({"slice": label, "rows": chk["rows"], "engine": name, "time_s": round(m["median_s"], 3),
-                         "peak_rss_mb": round(m["peak_rss_mb"], 0), "max_rel_diff_vs_polars_lazy": float(f"{diff:.1e}")})
+
+    schedule = [
+        (1, [("Polars lazy", bench_polars, "lazy"), ("Polars streaming", bench_polars, "streaming"),
+             ("Polars eager", bench_polars, "eager"), ("pandas + pushdown", bench_pandas, "pushdown"),
+             ("pandas naive", bench_pandas, "naive")]),
+        (2, [("Polars lazy", bench_polars, "lazy"), ("Polars streaming", bench_polars, "streaming"),
+             ("Polars eager", bench_polars, "eager"), ("pandas + pushdown", bench_pandas, "pushdown")]),
+        (4, [("Polars lazy", bench_polars, "lazy"), ("Polars streaming", bench_polars, "streaming"),
+             ("Polars eager", bench_polars, "eager"), ("pandas + pushdown", bench_pandas, "pushdown")]),
+        (8, [("Polars lazy", bench_polars, "lazy"), ("Polars streaming", bench_polars, "streaming")]),
+    ]
+
+    try:
+        for scale, eng_list in schedule:
+            src_p = bronze_p if scale == 1 else build_scaled_parquet(bronze_p, tmp_root / f"s{scale}", scale)
+            ref = None
+            for name, fn, mode in eng_list:
+                log.info(f"Scale {scale}x: {name}")
+                m = measure(fn, src_p, mode, repeat=REPEAT)
+                chk = m["result"]
+                ref = ref or chk
+                diff = max_rel_diff(chk, ref)
+                if diff > 1e-6:
+                    raise RuntimeError(f"engine outputs differ for {name} on {scale}x: {diff}")
+                rows.append({
+                    "scale": f"{scale}x",
+                    "scale_factor": scale,
+                    "rows": chk["rows"],
+                    "engine": name,
+                    "time_s": round(m["median_s"], 3),
+                    "peak_rss_mb": round(m["peak_rss_mb"], 0),
+                    "max_rel_diff_vs_polars_lazy": float(f"{diff:.1e}"),
+                })
+            if scale > 1:
+                shutil.rmtree(tmp_root / f"s{scale}", ignore_errors=True)
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
     return pl.DataFrame(rows)
 
 
 def capacity_extrapolation(res: pl.DataFrame, ram_gb: float = 16.0) -> dict:
-    """Linear fit of peak RSS and time against rows (3 measured sizes) -> rows at which RAM runs out. An ESTIMATE.
-
-    'pandas naive' is excluded: it always reads the whole file, so its memory does not depend on the slice and a
-    fit against the slice size would be meaningless.
-    """
+    """Linear fit of peak RSS and time against multi-scale measured rows (1x..8x) -> laptop 16GB RAM limit."""
     out = {}
     for eng in res["engine"].unique().to_list():
-        if eng == "pandas naive":
-            continue
         d = res.filter(pl.col("engine") == eng).sort("rows")
+        if d.height < 2:
+            continue
         x = d["rows"].to_numpy() / 1e6
         mem_slope, mem_icpt = np.polyfit(x, d["peak_rss_mb"].to_numpy(), 1)
         t_slope, _ = np.polyfit(x, d["time_s"].to_numpy(), 1)
-        out[eng] = {"mb_per_million_rows": round(float(mem_slope), 0), "seconds_per_million_rows": round(float(t_slope), 3),
-                    "rows_millions_until_16gb": round(float((ram_gb * 1024 - mem_icpt) / mem_slope), 0)}
+        out[eng] = {
+            "measured_max_scale": d["scale"][-1],
+            "mb_per_million_rows": round(float(mem_slope), 1),
+            "seconds_per_million_rows": round(float(t_slope), 3),
+            "rows_millions_until_16gb": round(float((ram_gb * 1024 - mem_icpt) / max(1.0, mem_slope)), 1),
+        }
     return out
 
 
-def plot(res: pl.DataFrame) -> None:
+def plot(res: pl.DataFrame, spark_df: pl.DataFrame | None = None) -> None:
     d = res.to_pandas()
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4.4))
-    sty = {"Polars lazy": ("#2b8cbe", "o"), "Polars streaming": ("#7bccc4", "d"), "Polars eager": ("#5cb85c", "^"),
-           "pandas + pushdown": ("#f0ad4e", "s"), "pandas naive": ("#d9534f", "x")}
-    for eng, (col, mk) in sty.items():
-        s = d[d["engine"] == eng]
-        a1.plot(s["rows"] / 1e6, s["time_s"], marker=mk, color=col, lw=2, label=eng)
-        a2.plot(s["rows"] / 1e6, s["peak_rss_mb"], marker=mk, color=col, lw=2, label=eng)
-    a1.set_xlabel("panel rows (millions)"); a1.set_ylabel("seconds (median of 3)"); a1.set_title("Time")
-    a2.set_xlabel("panel rows (millions)"); a2.set_ylabel("peak RSS (MB)"); a2.set_title("Peak memory")
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(11.2, 4.5))
+    sty = {
+        "Polars lazy": ("#2b8cbe", "o", "-"),
+        "Polars streaming": ("#1b9e77", "d", "-"),
+        "Polars eager": ("#5cb85c", "^", "--"),
+        "pandas + pushdown": ("#f0ad4e", "s", "-"),
+        "pandas naive": ("#d9534f", "x", ":"),
+    }
+    for eng, (col, mk, ls) in sty.items():
+        s = d[d["engine"] == eng].sort_values("rows")
+        if s.empty:
+            continue
+        a1.plot(s["rows"] / 1e6, s["time_s"], marker=mk, linestyle=ls, color=col, lw=2, label=eng)
+        a2.plot(s["rows"] / 1e6, s["peak_rss_mb"], marker=mk, linestyle=ls, color=col, lw=2, label=eng)
+    if spark_df is not None and not spark_df.is_empty():
+        sd = spark_df.to_pandas().sort_values("rows")
+        a1.plot(sd["rows"] / 1e6, sd["total_s"], marker="*", markersize=9, linestyle="-.", color="#756bb1", lw=2,
+                label="PySpark (startup + compute)")
+        a2.plot(sd["rows"] / 1e6, sd["peak_rss_tree_mb"], marker="*", markersize=9, linestyle="-.", color="#756bb1", lw=2,
+                label="PySpark (Python + JVM RSS)")
+    a1.set_xlabel("Panel Rows (Millions, Synthetic Replication 1x–8x)")
+    a1.set_ylabel("Wall-Clock Time (seconds, median)")
+    a1.set_title("Multi-Scale Execution Time Scaling")
+    a2.set_xlabel("Panel Rows (Millions, Synthetic Replication 1x–8x)")
+    a2.set_ylabel("Peak RSS Memory (MB)")
+    a2.set_title("Multi-Scale Peak Process-Tree Memory")
     for a in (a1, a2):
         a.grid(True, alpha=0.3)
-        a.legend()
+        a.legend(fontsize=8)
     plt.tight_layout()
     p = out_dir("figures") / "part3_scaling_benchmark.png"
     plt.savefig(p, dpi=200)
@@ -123,6 +206,7 @@ def plot(res: pl.DataFrame) -> None:
 
 def main() -> None:
     bronze_p = bronze_financials_path()
+    save_benchmark_environment()
     capture_polars_plan(bronze_p)
     res = run(bronze_p)
     print(res)

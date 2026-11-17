@@ -1,16 +1,16 @@
-slice,rows,engine,time_s,peak_rss_mb,max_rel_diff_vs_polars_lazy
-2010-2026,386056,Polars lazy,0.318,421.0,0.0
-2010-2026,386056,Polars streaming,0.151,348.0,2.3e-16
-2010-2026,386056,Polars eager,0.367,640.0,0.0
-2010-2026,386056,pandas + pushdown,0.314,515.0,2.3e-16
-2010-2026,386056,pandas naive,1.019,1587.0,2.3e-16
-1995-2026,977097,Polars lazy,0.76,540.0,0.0
-1995-2026,977097,Polars streaming,0.386,852.0,1.3e-16
-1995-2026,977097,Polars eager,0.763,663.0,0.0
-1995-2026,977097,pandas + pushdown,0.469,743.0,1.3e-16
-1995-2026,977097,pandas naive,1.5,1799.0,1.3e-16
-1984-2026 (full),1682616,Polars lazy,1.271,691.0,0.0
-1984-2026 (full),1682616,Polars streaming,0.581,992.0,1.3e-16
-1984-2026 (full),1682616,Polars eager,1.259,780.0,0.0
-1984-2026 (full),1682616,pandas + pushdown,0.613,1039.0,2.4e-16
-1984-2026 (full),1682616,pandas naive,1.353,1947.0,2.4e-16
+scale,scale_factor,rows,engine,time_s,peak_rss_mb,max_rel_diff_vs_polars_lazy
+1x,1,1682616,Polars lazy,1.326,777.0,0.0
+1x,1,1682616,Polars streaming,0.619,1268.0,2.6e-16
+1x,1,1682616,Polars eager,1.281,711.0,0.0
+1x,1,1682616,pandas + pushdown,0.482,1044.0,2.4e-16
+1x,1,1682616,pandas naive,0.671,1940.0,2.4e-16
+2x,2,3365232,Polars lazy,2.665,1072.0,0.0
+2x,2,3365232,Polars streaming,1.284,1532.0,4.9e-16
+2x,2,3365232,Polars eager,2.656,1029.0,0.0
+2x,2,3365232,pandas + pushdown,0.882,1544.0,1.3e-16
+4x,4,6730464,Polars lazy,5.454,1613.0,0.0
+4x,4,6730464,Polars streaming,2.173,1734.0,3.5e-16
+4x,4,6730464,Polars eager,5.254,1710.0,0.0
+4x,4,6730464,pandas + pushdown,1.701,2689.0,1.2e-16
+8x,8,13460928,Polars lazy,10.406,2569.0,0.0
+8x,8,13460928,Polars streaming,4.271,2499.0,3.2e-16
