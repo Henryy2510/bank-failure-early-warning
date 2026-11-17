@@ -14,10 +14,23 @@
     "deposits_exceed_assets_with_negative_equity": 6202,
     "domestic_exceeds_total_deposits": 0,
     "net_loans_exceed_gross_loans": 15,
+    "gross_loans_exceed_assets": 761,
+    "nonaccrual_exceeds_noncurrent_plus_ore": 6236,
+    "ore_negative": 646,
+    "sc_negative": 96,
+    "chbal_negative": 2,
+    "nclnls_negative": 3,
+    "lnatres_negative": 9,
     "extreme_roa": 1056,
     "extreme_roe": 4624,
     "pre1990_rows": 419414,
     "pre1990_rbc1_zero_pct": 18.13,
+    "post1989_rbc1_zero": 3458,
+    "post1989_rbc1_zero_eq_null": 3369,
+    "era2020_rows": 123461,
+    "era2020_rbcrwa_zero": 45865,
+    "era2020_rbcrwa_zero_pct": 37.15,
+    "era2020_rbcrwa_zero_cblr": 45423,
     "p3asset_null_pct": 57.8
   },
   "failures": {
@@ -164,6 +177,73 @@
       "NTLNLS null %": 0.4,
       "RBC1AAJ null %": 0.0,
       "EQ null %": 0.4
+    }
+  ],
+  "zero_as_missing_by_era": [
+    {
+      "era": "1984-1989 (Pre-Basel)",
+      "rows": 419414,
+      "RBCRWAJ==0 (%)": 100.0,
+      "RBCRWAJ==0 & RBC1>0 (%)": 81.48,
+      "RBC1AAJ==0 (%)": 18.13
+    },
+    {
+      "era": "1990-1999",
+      "rows": 511880,
+      "RBCRWAJ==0 (%)": 0.31,
+      "RBCRWAJ==0 & RBC1>0 (%)": 0.01,
+      "RBC1AAJ==0 (%)": 0.3
+    },
+    {
+      "era": "2000-2009",
+      "rows": 365266,
+      "RBCRWAJ==0 (%)": 0.22,
+      "RBCRWAJ==0 & RBC1>0 (%)": 0.0,
+      "RBC1AAJ==0 (%)": 0.22
+    },
+    {
+      "era": "2010-2019",
+      "rows": 262595,
+      "RBCRWAJ==0 (%)": 0.26,
+      "RBCRWAJ==0 & RBC1>0 (%)": 0.0,
+      "RBC1AAJ==0 (%)": 0.26
+    },
+    {
+      "era": "2020-2026 (CBLR Era)",
+      "rows": 123461,
+      "RBCRWAJ==0 (%)": 37.15,
+      "RBCRWAJ==0 & RBC1>0 (%)": 36.79,
+      "RBC1AAJ==0 (%)": 0.36
+    }
+  ],
+  "ytd_monotonicity": [
+    {
+      "quarter": "Q1",
+      "rows": 427873,
+      "median_intinc_to_asset": 0.0177,
+      "median_netinc_to_asset": 0.0024,
+      "median_roa_pct": 0.971
+    },
+    {
+      "quarter": "Q2",
+      "rows": 424438,
+      "median_intinc_to_asset": 0.0352,
+      "median_netinc_to_asset": 0.0049,
+      "median_roa_pct": 0.989
+    },
+    {
+      "quarter": "Q3",
+      "rows": 417003,
+      "median_intinc_to_asset": 0.0526,
+      "median_netinc_to_asset": 0.0073,
+      "median_roa_pct": 0.993
+    },
+    {
+      "quarter": "Q4",
+      "rows": 413302,
+      "median_intinc_to_asset": 0.0689,
+      "median_netinc_to_asset": 0.0091,
+      "median_roa_pct": 0.944
     }
   ]
 }

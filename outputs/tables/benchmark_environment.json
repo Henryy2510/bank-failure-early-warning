@@ -1,0 +1,11 @@
+{
+  "os": "Linux-7.3.1-1-cachyos-x86_64-with-glibc2.44",
+  "python": "3.12.13",
+  "cpu_physical": 6,
+  "cpu_logical": 12,
+  "ram_total_gb": 15.34,
+  "ram_available_gb_at_start": 6.55,
+  "polars": "2.1.0",
+  "pandas": "3.1.1",
+  "polars_max_threads": "4"
+}

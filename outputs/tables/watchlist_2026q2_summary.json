@@ -1,0 +1,11 @@
+{
+  "quarter": "2026-06-30",
+  "banks_scored": 4306,
+  "theta": 0.0039,
+  "flagged_at_theta": 26,
+  "flagged_top_1pct": 43,
+  "flagged_top_2pct": 86,
+  "mean_prob": 0.00054,
+  "max_prob": 0.4253,
+  "note": "Scored with strictly DEV-trained champion; labels >=2026Q3 are unobservable; NAME/BKCLASS from static institutions snapshot."
+}

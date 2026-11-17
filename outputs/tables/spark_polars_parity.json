@@ -12,9 +12,9 @@
   },
   "timing_seconds": {
     "polars_lazy_collect_plus_aggregate": 0.62,
-    "spark_session_startup": 3.98,
-    "spark_job_cold": 4.97,
-    "spark_job_warm": 2.18,
+    "spark_session_startup": 4.3,
+    "spark_job_cold": 4.95,
+    "spark_job_warm": 2.17,
     "note": "single in-process runs on the full panel; Spark = local[2], 1.2 GB driver"
   }
 }

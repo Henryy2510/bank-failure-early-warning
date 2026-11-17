@@ -1,7 +1,7 @@
-format,size_mb,full_read_s,read_3_cols_s,filter_2023_s,compression_vs_csv
-CSV (uncompressed),425.7,0.754,0.209,0.623,1.0
-"Parquet single file, Snappy",210.8,0.182,0.034,0.032,2.02
-"Parquet single file, Zstd-3",153.8,0.205,0.036,0.032,2.77
-"Parquet hive YEAR=, Zstd-3 (chosen)",154.1,0.228,0.038,0.035,2.76
-pandas.read_csv (CSV),425.7,0.668,,,1.0
-pandas.read_parquet (single Zstd-3),153.8,0.57,,,2.77
+format,size_mb,write_s,full_read_s,read_3_cols_s,filter_2023_s,compression_vs_csv
+CSV (uncompressed),425.7,0.77,0.683,0.22,0.988,1.0
+"Parquet single file, Snappy",210.8,0.296,0.229,0.033,0.031,2.02
+"Parquet single file, Zstd-3",153.8,0.589,0.21,0.037,0.036,2.77
+"Parquet hive YEAR=, Zstd-3 (chosen)",154.1,0.922,0.233,0.042,0.04,2.76
+pandas.read_csv (CSV),425.7,,0.68,,,1.0
+pandas.read_parquet (single Zstd-3),153.8,,0.491,,,2.77
