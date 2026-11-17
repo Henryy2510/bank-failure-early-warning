@@ -31,19 +31,33 @@ def safe_div(num: pl.Expr, den: pl.Expr) -> pl.Expr:
     return pl.when(den > 0).then(num / den).otherwise(None)
 
 
+NONNEG_STOCKS = ["ORE", "SC", "CHBAL", "NCLNLS", "LNATRES", "NAASSET"]
+
+
 def compute_camels_features(df: pl.DataFrame) -> pl.DataFrame:
     """All features use data dated <= REPDTE of the same bank. No future information is used."""
     log.info("Computing CAMELS ratios and Texas ratio...")
     df = add_time_keys(df)
+    # Sanitize impossible negative stock balances before ratio calculation (<=0.04% of rows)
+    df = df.with_columns(
+        [pl.when(pl.col(c) < 0).then(None).otherwise(pl.col(c)).alias(c) for c in NONNEG_STOCKS if c in df.columns]
+    )
+
     pre_basel = pl.col("year") < 1990
+    eq_missing = pl.col("EQ").is_null()
+    cblr_post2020 = (pl.col("year") >= 2020) & (pl.col("RBC1AAJ") > 0).fill_null(False)
+    healthy_lev = (pl.col("RBC1AAJ") >= 8.0).fill_null(False)
+    rbc1_unreported = (pl.col("RBC1AAJ") == 0).fill_null(False) & (pre_basel | eq_missing)
+    rbcrwa_unreported = (pl.col("RBCRWAJ") == 0).fill_null(False) & (pre_basel | eq_missing | cblr_post2020 | healthy_lev)
+
     asset, loans, dep = pl.col("ASSET"), pl.col("LNLSGR"), pl.col("DEP")
 
     df = df.with_columns(
         # C
         safe_div(pl.col("EQ"), asset).alias("eq_asset_ratio"),
-        # Basel risk-based ratios were not reported before 1990: a recorded 0 is "not available", not "zero capital"
-        pl.when(pre_basel & (pl.col("RBC1AAJ") == 0)).then(None).otherwise(pl.col("RBC1AAJ")).alias("rbc1aaj_clean"),
-        pl.when(pre_basel & (pl.col("RBCRWAJ") == 0)).then(None).otherwise(pl.col("RBCRWAJ")).alias("rbcrwaj_clean"),
+        # Basel ratios recorded as 0 are unreported when pre-1990, missing EQ, or post-2020 CBLR exempt
+        pl.when(rbc1_unreported).then(None).otherwise(pl.col("RBC1AAJ")).alias("rbc1aaj_clean"),
+        pl.when(rbcrwa_unreported).then(None).otherwise(pl.col("RBCRWAJ")).alias("rbcrwaj_clean"),
         ((pl.col("EQ") < 0) | (safe_div(pl.col("EQ"), asset) < 0.02)).cast(pl.Float64).alias("cap_distress_flag"),
         # A
         safe_div(pl.col("NCLNLS"), loans).alias("nclnls_ratio"),
