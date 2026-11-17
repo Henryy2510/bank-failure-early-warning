@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
@@ -50,38 +51,73 @@ def run_storage_benchmark(df: pl.DataFrame) -> pl.DataFrame:
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
     d = df.sort(["REPDTE", "CERT"])
-    csv_p, snappy_p, zstd_p = tmp / "fin.csv", tmp / "fin_snappy.parquet", tmp / "fin_zstd.parquet"
-    log.info("Writing the full CSV and single-file Parquet variants for measurement...")
+    csv_p, snappy_p, zstd_p, hive_tmp = tmp / "fin.csv", tmp / "fin_snappy.parquet", tmp / "fin_zstd.parquet", tmp / "fin_hive"
+    log.info("Writing the CSV, single-file Parquet, and Hive Parquet variants for measurement...")
+    t0 = time.perf_counter()
     d.write_csv(csv_p)
+    w_csv = time.perf_counter() - t0
+    t0 = time.perf_counter()
     d.write_parquet(snappy_p, compression="snappy", row_group_size=50_000, statistics=True)
+    w_snappy = time.perf_counter() - t0
+    t0 = time.perf_counter()
     d.write_parquet(zstd_p, compression="zstd", compression_level=3, row_group_size=50_000, statistics=True)
+    w_zstd = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    for yr in sorted(d["REPDTE"].dt.year().unique().to_list()):
+        yp = hive_tmp / f"YEAR={yr}"
+        yp.mkdir(parents=True, exist_ok=True)
+        d.filter(pl.col("REPDTE").dt.year() == yr).write_parquet(
+            yp / "part-0.parquet", compression="zstd", compression_level=3, statistics=True, row_group_size=50_000
+        )
+    w_hive = time.perf_counter() - t0
     hive_p = bronze_financials_path()
 
     plan = [
-        ("CSV (uncompressed)", csv_p, csv_full, csv_proj, csv_year),
-        ("Parquet single file, Snappy", snappy_p, pq_full, pq_proj, pq_year),
-        ("Parquet single file, Zstd-3", zstd_p, pq_full, pq_proj, pq_year),
-        ("Parquet hive YEAR=, Zstd-3 (chosen)", hive_p, hive_full, hive_proj, hive_year),
+        ("CSV (uncompressed)", csv_p, w_csv, csv_full, csv_proj, csv_year),
+        ("Parquet single file, Snappy", snappy_p, w_snappy, pq_full, pq_proj, pq_year),
+        ("Parquet single file, Zstd-3", zstd_p, w_zstd, pq_full, pq_proj, pq_year),
+        ("Parquet hive YEAR=, Zstd-3 (chosen)", hive_p, w_hive, hive_full, hive_proj, hive_year),
     ]
     rows = []
-    for name, path, f_full, f_proj, f_year in plan:
+    for name, path, w_s, f_full, f_proj, f_year in plan:
         log.info(f"Measuring {name} (median of {REPEAT} runs, fresh process, warm page cache)...")
         rows.append({
-            "format": name, "size_mb": round(_mb(path), 1),
+            "format": name, "size_mb": round(_mb(path), 1), "write_s": round(w_s, 3),
             "full_read_s": round(measure(f_full, path, repeat=REPEAT)["median_s"], 3),
             "read_3_cols_s": round(measure(f_proj, path, repeat=REPEAT)["median_s"], 3),
             "filter_2023_s": round(measure(f_year, path, repeat=REPEAT)["median_s"], 3),
         })
     # pandas readers on the same files (the usual baseline)
-    rows.append({"format": "pandas.read_csv (CSV)", "size_mb": rows[0]["size_mb"],
+    rows.append({"format": "pandas.read_csv (CSV)", "size_mb": rows[0]["size_mb"], "write_s": None,
                  "full_read_s": round(measure(pd_csv_full, csv_p, repeat=REPEAT)["median_s"], 3),
                  "read_3_cols_s": None, "filter_2023_s": None})
-    rows.append({"format": "pandas.read_parquet (single Zstd-3)", "size_mb": rows[2]["size_mb"],
+    rows.append({"format": "pandas.read_parquet (single Zstd-3)", "size_mb": rows[2]["size_mb"], "write_s": None,
                  "full_read_s": round(measure(pd_pq_full, zstd_p, repeat=REPEAT)["median_s"], 3),
                  "read_3_cols_s": None, "filter_2023_s": None})
     shutil.rmtree(tmp, ignore_errors=True)
     res = pl.DataFrame(rows).with_columns((pl.col("size_mb").first() / pl.col("size_mb")).round(2).alias("compression_vs_csv"))
     return res
+
+
+def run_float32_precision_check(df: pl.DataFrame) -> pl.DataFrame:
+    """Quantify float32 rounding error vs float64 canonical storage (justifies Float64 for USD stock amounts)."""
+    cols = ["ASSET", "DEP", "EQ", "NETINC", "ROA", "ROE", "RBC1AAJ", "RBCRWAJ"]
+    rows = []
+    for c in cols:
+        s = df[c].drop_nulls()
+        s64 = s.cast(pl.Float64)
+        s32 = s.cast(pl.Float32).cast(pl.Float64)
+        err = (s64 - s32).abs()
+        rel = err / s64.abs().clip(lower_bound=1.0)
+        gt_2p24 = int((s64.abs() > float(2**24)).sum())
+        rows.append({
+            "column": c,
+            "max_abs_value": round(float(s64.abs().max()), 2),
+            "rows_exceeding_float32_exact_int_limit": gt_2p24,
+            "max_abs_error": round(float(err.max()), 4),
+            "max_rel_error": float(f"{float(rel.max()):.3e}"),
+        })
+    return pl.DataFrame(rows)
 
 
 def plot_storage(res: pl.DataFrame) -> None:
@@ -118,6 +154,9 @@ def main() -> None:
     res = run_storage_benchmark(df)
     res.write_csv(out_dir("tables") / "part1_storage_benchmark.csv")
     print(res)
+    f32 = run_float32_precision_check(df)
+    f32.write_csv(out_dir("tables") / "part1_float32_check.csv")
+    log.info(f"Float32 quantization check:\n{f32}")
     plot_storage(res)
 
 
