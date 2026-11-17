@@ -10,11 +10,27 @@ os.environ["POLARS_MAX_THREADS"] = "4"
 
 import polars as pl
 
-from src.bfews.io import failures_by_cert
+from src.bfews.io import failures_by_cert, parse_institutions
 from src.bfews.panel import build_silver_panel
 from src.bfews.utils import data_dir, get_logger, out_dir, save_json
 
 log = get_logger("03_panel")
+
+FDIC_CHANGEC1_MEANINGS = {
+    211: "Failure - Whole Institution",
+    213: "Merger - Assisted",
+    216: "Bridge Bank Resolution",
+    217: "Receivership / Conservatorship",
+    221: "Absorption - Without Assistance",
+    222: "Consolidation - Without Assistance",
+    223: "Merger - Without Assistance",
+    224: "Affiliated Institution Merger",
+    225: "Partial P&A - Without Assistance",
+    230: "Closing - Failure Payoff",
+    235: "RTC Payoff / Liquidation",
+    240: "Closing - Voluntary",
+    470: "Charter / Agency Change",
+}
 
 
 def main() -> None:
@@ -37,6 +53,24 @@ def main() -> None:
                 .sort("exit_status", "FAILTYPE"))
     print(crosstab)
     crosstab.write_csv(out_dir("tables") / "failure_record_crosstab.csv")
+
+    inst_codes = parse_institutions().select(["CERT", "CHANGEC1"])
+    cc_tbl = (
+        exits.filter(pl.col("exit_status") != "ACTIVE")
+        .join(inst_codes, on="CERT", how="left")
+        .group_by("CHANGEC1")
+        .agg(
+            pl.len().alias("exited_banks"),
+            (pl.col("exit_status") == "FAILED").sum().alias("classified_failed"),
+            pl.col("has_failure_record").sum().alias("in_failures_table"),
+        )
+        .sort("exited_banks", descending=True)
+        .with_columns(
+            pl.col("CHANGEC1").replace_strict(FDIC_CHANGEC1_MEANINGS, default="Other / Unspecified").alias("meaning")
+        )
+    )
+    cc_tbl.write_csv(out_dir("tables") / "exit_changec1_codes.csv")
+    log.info(f"Saved CHANGEC1 exit audit ({cc_tbl.height} codes) to outputs/tables/exit_changec1_codes.csv")
 
     def n(status: str, ftype: str) -> int:
         r = crosstab.filter((pl.col("exit_status") == status) & (pl.col("FAILTYPE") == ftype))

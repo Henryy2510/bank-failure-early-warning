@@ -50,7 +50,10 @@ def audit_missingness_by_era(df: pl.DataFrame) -> pl.DataFrame:
 
 def audit_domain_validity(df: pl.DataFrame) -> dict[str, Any]:
     n = df.height
-    pre90 = df.filter(pl.col("REPDTE").dt.year() < 1990)
+    yr = pl.col("REPDTE").dt.year()
+    pre90 = df.filter(yr < 1990)
+    post89 = df.filter(yr >= 1990)
+    era2020 = df.filter(yr >= 2020)
     cnt = lambda e: int(df.filter(e).height)  # noqa: E731
     return {
         "rows": n,
@@ -61,12 +64,67 @@ def audit_domain_validity(df: pl.DataFrame) -> dict[str, Any]:
         "deposits_exceed_assets_with_negative_equity": cnt((pl.col("DEP") > pl.col("ASSET")) & (pl.col("EQ") < 0)),
         "domestic_exceeds_total_deposits": cnt(pl.col("DEPDOM") > pl.col("DEP")),
         "net_loans_exceed_gross_loans": cnt(pl.col("LNLSNET") > pl.col("LNLSGR")),
+        "gross_loans_exceed_assets": cnt(pl.col("LNLSGR") > pl.col("ASSET")),
+        "nonaccrual_exceeds_noncurrent_plus_ore": cnt(
+            pl.col("NAASSET") > (pl.col("NCLNLS").fill_null(0.0) + pl.col("ORE").fill_null(0.0))
+        ),
+        "ore_negative": cnt(pl.col("ORE") < 0),
+        "sc_negative": cnt(pl.col("SC") < 0),
+        "chbal_negative": cnt(pl.col("CHBAL") < 0),
+        "nclnls_negative": cnt(pl.col("NCLNLS") < 0),
+        "lnatres_negative": cnt(pl.col("LNATRES") < 0),
         "extreme_roa": cnt(pl.col("ROA").abs() > 50),
         "extreme_roe": cnt(pl.col("ROE").abs() > 200),
         "pre1990_rows": pre90.height,
         "pre1990_rbc1_zero_pct": round(pre90.filter(pl.col("RBC1AAJ") == 0).height / max(1, pre90.height) * 100, 2),
+        "post1989_rbc1_zero": post89.filter(pl.col("RBC1AAJ") == 0).height,
+        "post1989_rbc1_zero_eq_null": post89.filter((pl.col("RBC1AAJ") == 0) & pl.col("EQ").is_null()).height,
+        "era2020_rows": era2020.height,
+        "era2020_rbcrwa_zero": era2020.filter(pl.col("RBCRWAJ") == 0).height,
+        "era2020_rbcrwa_zero_pct": round(era2020.filter(pl.col("RBCRWAJ") == 0).height / max(1, era2020.height) * 100, 2),
+        "era2020_rbcrwa_zero_cblr": era2020.filter((pl.col("RBCRWAJ") == 0) & (pl.col("RBC1AAJ") > 0)).height,
         "p3asset_null_pct": round(df["P3ASSET"].null_count() / n * 100, 1),
     }
+
+
+def audit_zero_as_missing_by_era(df: pl.DataFrame) -> pl.DataFrame:
+    """Detect zero-as-missing regimes across regulatory eras (Basel transition pre-1990 & CBLR opt-in post-2020)."""
+    yr = pl.col("REPDTE").dt.year()
+    era_expr = (
+        pl.when(yr < 1990).then(pl.lit("1984-1989 (Pre-Basel)"))
+        .when(yr < 2000).then(pl.lit("1990-1999"))
+        .when(yr < 2010).then(pl.lit("2000-2009"))
+        .when(yr < 2020).then(pl.lit("2010-2019"))
+        .otherwise(pl.lit("2020-2026 (CBLR Era)"))
+    )
+    return (
+        df.with_columns(era_expr.alias("era"))
+        .group_by("era")
+        .agg(
+            pl.len().alias("rows"),
+            ((pl.col("RBCRWAJ") == 0).mean() * 100).round(2).alias("RBCRWAJ==0 (%)"),
+            (((pl.col("RBCRWAJ") == 0) & (pl.col("RBC1AAJ") > 0)).mean() * 100).round(2).alias("RBCRWAJ==0 & RBC1>0 (%)"),
+            ((pl.col("RBC1AAJ") == 0).mean() * 100).round(2).alias("RBC1AAJ==0 (%)"),
+        )
+        .sort("era")
+    )
+
+
+def audit_ytd_monotonicity(df: pl.DataFrame) -> pl.DataFrame:
+    """Prove cumulatively reported YTD income flows grow monotonically Q1->Q4 while annualised ROA stays flat."""
+    return (
+        df.filter(pl.col("ASSET") > 0)
+        .with_columns(pl.col("REPDTE").dt.quarter().alias("quarter"))
+        .group_by("quarter")
+        .agg(
+            pl.len().alias("rows"),
+            (pl.col("INTINC") / pl.col("ASSET")).median().round(4).alias("median_intinc_to_asset"),
+            (pl.col("NETINC") / pl.col("ASSET")).median().round(4).alias("median_netinc_to_asset"),
+            pl.col("ROA").median().round(3).alias("median_roa_pct"),
+        )
+        .sort("quarter")
+        .with_columns((pl.lit("Q") + pl.col("quarter").cast(pl.String)).alias("quarter"))
+    )
 
 
 def audit_failures_and_exits(df: pl.DataFrame) -> dict[str, Any]:
@@ -106,7 +164,12 @@ def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
     df = read_raw_all()
     era = audit_missingness_by_era(df)
     v = audit_domain_validity(df)
+    zeros_era = audit_zero_as_missing_by_era(df)
+    ytd_mono = audit_ytd_monotonicity(df)
     f = audit_failures_and_exits(df)
+
+    zeros_era.write_csv(out_dir("tables") / "dq_zero_as_missing.csv")
+    ytd_mono.write_csv(out_dir("tables") / "dq_ytd_monotonicity.csv")
 
     lines = [
         "# Automated Data Quality Audit (Part 2)",
@@ -123,18 +186,29 @@ def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
         "",
         df_to_markdown(drift.select(["column", "types"])),
         "",
-        "## 3. Structural missingness by era (% null)",
+        "## 3. Structural missingness by era (% null) & Zero-as-Missing regimes",
         df_to_markdown(era),
         "",
-        "## 4. Domain validity and accounting invariants",
+        "### Basel / CBLR Zero-as-Missing Regime Audit",
+        f"In **2020-2026**, `{v['era2020_rbcrwa_zero']:,}` / `{v['era2020_rows']:,}` (**{v['era2020_rbcrwa_zero_pct']}%**) rows record `RBCRWAJ == 0`, "
+        f"of which `{v['era2020_rbcrwa_zero_cblr']:,}` have positive Tier 1 leverage (`RBC1AAJ > 0`): healthy small banks electing the Community Bank Leverage Ratio (CBLR) exempt from RWA reporting. "
+        f"Post-1989 `RBC1AAJ == 0` occurs in `{v['post1989_rbc1_zero']:,}` rows (`{v['post1989_rbc1_zero_eq_null']:,}` with `EQ IS NULL`).",
+        "",
+        df_to_markdown(zeros_era),
+        "",
+        "## 4. Domain validity, negative stock anomalies & YTD flow evidence",
         f"- `ASSET <= 0`: **{v['asset_nonpositive']}** rows",
         f"- Negative equity: **{v['negative_equity']:,}** rows ({v['negative_equity_pct']}%)",
         f"- `DEP > ASSET`: **{v['deposits_exceed_assets']:,}** rows, of which **{v['deposits_exceed_assets_with_negative_equity']:,}** have negative equity",
-        f"- `DEPDOM > DEP`: **{v['domestic_exceeds_total_deposits']}**; `LNLSNET > LNLSGR`: **{v['net_loans_exceed_gross_loans']}**",
+        f"- `DEPDOM > DEP`: **{v['domestic_exceeds_total_deposits']}**; `LNLSNET > LNLSGR`: **{v['net_loans_exceed_gross_loans']}**; `LNLSGR > ASSET`: **{v['gross_loans_exceed_assets']:,}**",
+        f"- Non-negative stock anomalies: `ORE < 0` (**{v['ore_negative']:,}**), `SC < 0` (**{v['sc_negative']:,}**), `CHBAL < 0` (**{v['chbal_negative']:,}**), `NCLNLS < 0` (**{v['nclnls_negative']:,}**), `LNATRES < 0` (**{v['lnatres_negative']:,}**)",
+        f"- `NAASSET > NCLNLS + ORE`: **{v['nonaccrual_exceeds_noncurrent_plus_ore']:,}** rows (structural schedule reporting differences)",
         f"- |ROA| > 50%: **{v['extreme_roa']:,}** rows; |ROE| > 200%: **{v['extreme_roe']:,}** rows",
-        f"- `RBC1AAJ == 0` before 1990: **{v['pre1990_rbc1_zero_pct']}%** of {v['pre1990_rows']:,} rows (ratio not reported yet)",
         "",
-        "## 5. Failures table, exits and point-in-time",
+        "### Empirical YTD Flow Monotonicity (Q1 -> Q4)",
+        df_to_markdown(ytd_mono),
+        "",
+        "## 5. Failures table, exits, CHANGEC1 & point-in-time",
         f"- Failure/assistance events: **{f['events_all_time']:,}** all-time; **{f['events_without_cert']}** have no CERT (pre-1966); "
         f"**{f['events_since_1984']:,}** since 1984 (by type: {f['restype_since_1984']})",
         f"- Events since 1984 with a CERT: **{f['events_since_1984_with_cert']:,}**; matched to the panel: **{f['events_matched_to_panel']:,}**; "
@@ -143,6 +217,7 @@ def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
         f"- Last Call Report -> failure date: median **{f['gap_median_days']:.0f}** days, 95th percentile **{f['gap_p95_days']:.0f}** days",
         f"- **{f['share_last_report_not_scorable']}%** of failed banks fail within {f['publication_lag_days']} days of their last "
         "quarter-end, i.e. before that report could have been read: those rows are flagged `pit_scorable = False`",
+        "- **Static Institutions Caveat**: `institutions.parquet` stores *current* metadata (`STNAME`, `ACTIVE`, `CHANGEC1`), not historical point-in-time state; exit audit uses it only post-hoc, never for historical predictive features.",
         "",
         "## 6. Decision matrix",
         "| Issue | Evidence | Handling | Why |",
@@ -150,18 +225,26 @@ def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
         f"| Schema drift | {drift.height} columns | explicit cast of every column when building Bronze | stable schema, `scan_parquet` works |",
         "| Dates stored as strings | `REPDTE`, `FAILDATE`, `ESTYMD` | parse to `Date` | date arithmetic, window joins, row-group statistics |",
         f"| Structural missing | `P3ASSET` null in {v['p3asset_null_pct']}% of rows | keep null, impute on training data only | missing is a reporting regime, not noise |",
-        "| YTD flows | 7 income items | de-cumulate, only if previous row is the previous quarter | true quarterly flow; no wrong lag across a gap |",
-        f"| Basel zeros | `RBC1AAJ == 0` in {v['pre1990_rbc1_zero_pct']}% of pre-1990 rows | recode to null | 0 would mean zero capital |",
+        "| YTD flows | 7 income items (`Q1->Q4` step-up) | de-cumulate, only if previous row is the previous quarter | true quarterly flow; no wrong lag across a gap |",
+        f"| Pre-Basel & CBLR zeros | `RBC1AAJ==0` pre-1990 ({v['pre1990_rbc1_zero_pct']}%) & `RBCRWAJ==0` in 2020-26 ({v['era2020_rbcrwa_zero_pct']}%) | recode to null when pre-1990, `EQ IS NULL`, or CBLR (`year>=2020 & RBC1AAJ>0`) | prevents labeling 37% of healthy 2020+ banks as 0% capital |",
+        f"| Negative stock anomalies | `ORE<0` ({v['ore_negative']}), `SC<0` ({v['sc_negative']}) | sanitize negative stocks to null before ratios | accounting adjustment artifacts, not negative holdings |",
         f"| Negative equity | {v['negative_equity']:,} rows | keep + distress flag; Texas ratio capped | these are the banks about to fail |",
         "| Extreme ratios | ROA, ROE, ... | winsorise inside each training fold | a global clip would use future data |",
         "| Merger vs failure | exit classification | merger = censored, y = 0 | healthy acquired banks are not failures |",
         f"| Publication lag | {f['share_last_report_not_scorable']}% of failures | rows that failed before availability are non-scorable | no look-ahead in training or evaluation |",
-        "| Assistance vs closure | RESTYPE | both are failure events (course definition); counts by type reported | transparent |",
+        "| Assistance vs closure | RESTYPE | both are failure events (DEV sensitivity vs FAILURE-only reported; TEST has 0 ASSISTANCE) | transparent |",
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    summary = {"manifest": m, "validity": v, "failures": f, "schema_drift_columns": drift["column"].to_list(),
-               "missingness_by_era": era.to_dicts()}
+    summary = {
+        "manifest": m,
+        "validity": v,
+        "failures": f,
+        "schema_drift_columns": drift["column"].to_list(),
+        "missingness_by_era": era.to_dicts(),
+        "zero_as_missing_by_era": zeros_era.to_dicts(),
+        "ytd_monotonicity": ytd_mono.to_dicts(),
+    }
     save_json(summary, out_dir("tables") / "dq_summary.json")
     return summary
