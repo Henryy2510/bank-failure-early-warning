@@ -60,7 +60,7 @@ In **2020-2026**, `45,865` / `123,461` (**37.15%**) rows record `RBCRWAJ == 0`, 
 - `NAASSET > NCLNLS + ORE`: **6,236** rows (structural schedule reporting differences)
 - |ROA| > 50%: **1,056** rows; |ROE| > 200%: **4,624** rows
 
-### Empirical YTD Flow Monotonicity (Q1 -> Q4)
+### Empirical YTD Flow Monotonicity (Q1 $\rightarrow$ Q4)
 | quarter | rows | median_intinc_to_asset | median_netinc_to_asset | median_roa_pct |
 |---|---|---|---|---|
 | Q1 | 427873 | 0.0177 | 0.0024 | 0.971 |
@@ -72,7 +72,7 @@ In **2020-2026**, `45,865` / `123,461` (**37.15%**) rows record `RBCRWAJ == 0`, 
 - Failure/assistance events: **4,117** all-time; **488** have no CERT (pre-1966); **3,275** since 1984 (by type: {'FAILURE': 2863, 'ASSISTANCE': 412})
 - Events since 1984 with a CERT: **3,275**; matched to the panel: **3,253**; not in panel: **22**
 - CERTs that appear more than once in the table: **88** (earliest event is used)
-- Last Call Report -> failure date: median **49** days, 95th percentile **111** days
+- Last Call Report $\rightarrow$ failure date: median **49** days, 95th percentile **111** days
 - **59.1%** of failed banks fail within 60 days of their last quarter-end, i.e. before that report could have been read: those rows are flagged `pit_scorable = False`
 - **Static Institutions Caveat**: `institutions.parquet` stores *current* metadata (`STNAME`, `ACTIVE`, `CHANGEC1`), not historical point-in-time state; exit audit uses it only post-hoc, never for historical predictive features.
 
@@ -82,7 +82,7 @@ In **2020-2026**, `45,865` / `123,461` (**37.15%**) rows record `RBCRWAJ == 0`, 
 | Schema drift | 14 columns | explicit cast of every column when building Bronze | stable schema, `scan_parquet` works |
 | Dates stored as strings | `REPDTE`, `FAILDATE`, `ESTYMD` | parse to `Date` | date arithmetic, window joins, row-group statistics |
 | Structural missing | `P3ASSET` null in 57.8% of rows | keep null, impute on training data only | missing is a reporting regime, not noise |
-| YTD flows | 7 income items (`Q1->Q4` step-up) | de-cumulate, only if previous row is the previous quarter | true quarterly flow; no wrong lag across a gap |
+| YTD flows | 7 income items (`Q1` $\rightarrow$ `Q4` step-up) | de-cumulate, only if previous row is the previous quarter | true quarterly flow; no wrong lag across a gap |
 | Pre-Basel & CBLR zeros | `RBC1AAJ==0` pre-1990 (18.13%) & `RBCRWAJ==0` in 2020-26 (37.15%) | recode to null when pre-1990, `EQ IS NULL`, or CBLR (`year>=2020 & RBC1AAJ>0`) | prevents labeling 37% of healthy 2020+ banks as 0% capital |
 | Negative stock anomalies | `ORE<0` (646), `SC<0` (96) | sanitize negative stocks to null before ratios | accounting adjustment artifacts, not negative holdings |
 | Negative equity | 15,659 rows | keep + distress flag; Texas ratio capped | these are the banks about to fail |

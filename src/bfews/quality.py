@@ -205,7 +205,7 @@ def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
         f"- `NAASSET > NCLNLS + ORE`: **{v['nonaccrual_exceeds_noncurrent_plus_ore']:,}** rows (structural schedule reporting differences)",
         f"- |ROA| > 50%: **{v['extreme_roa']:,}** rows; |ROE| > 200%: **{v['extreme_roe']:,}** rows",
         "",
-        "### Empirical YTD Flow Monotonicity (Q1 -> Q4)",
+        r"### Empirical YTD Flow Monotonicity (Q1 $\rightarrow$ Q4)",
         df_to_markdown(ytd_mono),
         "",
         "## 5. Failures table, exits, CHANGEC1 & point-in-time",
@@ -214,7 +214,7 @@ def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
         f"- Events since 1984 with a CERT: **{f['events_since_1984_with_cert']:,}**; matched to the panel: **{f['events_matched_to_panel']:,}**; "
         f"not in panel: **{f['events_not_in_panel']}**",
         f"- CERTs that appear more than once in the table: **{f['certs_with_multiple_events']}** (earliest event is used)",
-        f"- Last Call Report -> failure date: median **{f['gap_median_days']:.0f}** days, 95th percentile **{f['gap_p95_days']:.0f}** days",
+        rf"- Last Call Report $\rightarrow$ failure date: median **{f['gap_median_days']:.0f}** days, 95th percentile **{f['gap_p95_days']:.0f}** days",
         f"- **{f['share_last_report_not_scorable']}%** of failed banks fail within {f['publication_lag_days']} days of their last "
         "quarter-end, i.e. before that report could have been read: those rows are flagged `pit_scorable = False`",
         "- **Static Institutions Caveat**: `institutions.parquet` stores *current* metadata (`STNAME`, `ACTIVE`, `CHANGEC1`), not historical point-in-time state; exit audit uses it only post-hoc, never for historical predictive features.",
@@ -225,7 +225,7 @@ def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
         f"| Schema drift | {drift.height} columns | explicit cast of every column when building Bronze | stable schema, `scan_parquet` works |",
         "| Dates stored as strings | `REPDTE`, `FAILDATE`, `ESTYMD` | parse to `Date` | date arithmetic, window joins, row-group statistics |",
         f"| Structural missing | `P3ASSET` null in {v['p3asset_null_pct']}% of rows | keep null, impute on training data only | missing is a reporting regime, not noise |",
-        "| YTD flows | 7 income items (`Q1->Q4` step-up) | de-cumulate, only if previous row is the previous quarter | true quarterly flow; no wrong lag across a gap |",
+        r"| YTD flows | 7 income items (`Q1` $\rightarrow$ `Q4` step-up) | de-cumulate, only if previous row is the previous quarter | true quarterly flow; no wrong lag across a gap |",
         f"| Pre-Basel & CBLR zeros | `RBC1AAJ==0` pre-1990 ({v['pre1990_rbc1_zero_pct']}%) & `RBCRWAJ==0` in 2020-26 ({v['era2020_rbcrwa_zero_pct']}%) | recode to null when pre-1990, `EQ IS NULL`, or CBLR (`year>=2020 & RBC1AAJ>0`) | prevents labeling 37% of healthy 2020+ banks as 0% capital |",
         f"| Negative stock anomalies | `ORE<0` ({v['ore_negative']}), `SC<0` ({v['sc_negative']}) | sanitize negative stocks to null before ratios | accounting adjustment artifacts, not negative holdings |",
         f"| Negative equity | {v['negative_equity']:,} rows | keep + distress flag; Texas ratio capped | these are the banks about to fail |",

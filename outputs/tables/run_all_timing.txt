@@ -1,15 +1,15 @@
-BFT65B Pipeline Execution Timing Log (2026-11-14T16:22:06+07:00)
+BFT65B Pipeline Execution Timing Log (2026-11-16T15:50:33+07:00)
 --------------------------------------------------------
 [Step 0/9] Part 1: Verifying Raw FDIC Data Completeness: 1s
-[Step 1/9] Part 1: Storage Layer Ingestion & Format Benchmarking: 41s
+[Step 1/9] Part 1: Storage Layer Ingestion & Format Benchmarking: 48s
 [Step 2/9] Part 2: Automated Data Quality Audit: 2s
-[Step 3/9] Part 2 (cont): Clean Silver Panel Build & Exit Classification: 4s
-[Step 4/9] Part 4: Gold Leak-Free Feature Pipeline & Target Generation: 3s
-[Step 5/9] Part 3: Scalable Processing Benchmarks (Polars vs Pandas): 61s
-[Step 6/9] Part 3 & 5: PySpark Pipeline, Execution Plan & MLlib Demo: 37s
-[Step 7/9] Part 5: Model Validation, Cost-Sensitive Threshold & Test: 63s
-[Step 8/9] Executing Notebooks via nbclient & Building Report (MD + DOCX + PDF): 10s
+[Step 3/9] Part 2 (cont): Clean Silver Panel Build & Exit Classification: 5s
+[Step 4/9] Part 4: Gold Leak-Free Feature Pipeline & Target Generation: 2s
+[Step 5/9] Part 3: Scalable Processing Benchmarks (Polars vs Pandas): 170s
+[Step 6/9] Part 3 & 5: PySpark Pipeline, Execution Plan & MLlib Demo: 95s
+[Step 7/9] Part 5: Model Validation, Cost-Sensitive Threshold & Test: 129s
+[Step 8/9] Executing Notebooks via nbclient & Building Report (MD + DOCX + PDF): 11s
 [Step 9/9] Verifying Report & README Number Consistency: 0s
-[Tests] Running Automated Pytest Suite: 3s
+[Tests] Running Automated Pytest Suite: 4s
 --------------------------------------------------------
-Total Wall-Clock Time: 225s
+Total Wall-Clock Time: 467s

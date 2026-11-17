@@ -1,21 +1,20 @@
-=== UNOPTIMIZED LOGICAL PLAN ===
- WITH_COLUMNS:
- [when(col("qidx").shift([dyn int: 4]).over([col("CERT")]) == (col("qidx") - 4)).then((col("ASSET") / col("ASSET").shift([dyn int: 4]).over([col("CERT")])) - 1.0).otherwise(null.cast(Float64)).alias("asset_growth_4q"), when(col("qidx").shift([dyn int: 4]).over([col("CERT")]) == (col("qidx") - 4)).then(col("texas_ratio") - col("texas_ratio").shift([dyn int: 4]).over([col("CERT")])).otherwise(null.cast(Float64)).alias("d4_texas_ratio")] 
+=== NAIVE LOGICAL PLAN (UNPROJECTED, POST-CORE FILTER ON COMPUTED `year`) ===
+FILTER col("year") >= 2008
+FROM
    WITH_COLUMNS:
-   [when(col("quarter") == 1).then(col("NETINC")).otherwise(when(col("qidx").shift([dyn int: 1]).over([col("CERT"), col("year")]) == (col("qidx") - 1)).then(col("NETINC") - col("NETINC").shift([dyn int: 1]).over([col("CERT"), col("year")])).otherwise(null.cast(Float64))).alias("NETINC_Q"), (col("EQ") / col("ASSET")).alias("eq_asset_ratio"), when((col("EQ").fill_null([0.0]) + col("LNATRES").fill_null([0.0])) > 0.0).then((((col("NCLNLS").fill_null([0.0]) + col("ORE").fill_null([0.0])) / (col("EQ").fill_null([0.0]) + col("LNATRES").fill_null([0.0])))).clip_max([dyn float: 10])).otherwise(10.0).alias("texas_ratio")] 
+   [when(col("qidx").shift([dyn int: 4]).over([col("CERT")]) == (col("qidx") - 4)).then((col("ASSET") / col("ASSET").shift([dyn int: 4]).over([col("CERT")])) - 1.0).otherwise(null.cast(Float64)).alias("asset_growth_4q"), when(col("qidx").shift([dyn int: 4]).over([col("CERT")]) == (col("qidx") - 4)).then(col("texas_ratio") - col("texas_ratio").shift([dyn int: 4]).over([col("CERT")])).otherwise(null.cast(Float64)).alias("d4_texas_ratio")] 
      WITH_COLUMNS:
-     [((col("year") * 4) + col("quarter").cast(Int32)).alias("qidx")] 
+     [when(col("quarter") == 1).then(col("NETINC")).otherwise(when(col("qidx").shift([dyn int: 1]).over([col("CERT"), col("year")]) == (col("qidx") - 1)).then(col("NETINC") - col("NETINC").shift([dyn int: 1]).over([col("CERT"), col("year")])).otherwise(null.cast(Float64))).alias("NETINC_Q"), (col("EQ") / col("ASSET")).alias("eq_asset_ratio"), when((col("EQ").fill_null([0.0]) + col("LNATRES").fill_null([0.0])) > 0.0).then((((col("NCLNLS").fill_null([0.0]) + col("ORE").fill_null([0.0])) / (col("EQ").fill_null([0.0]) + col("LNATRES").fill_null([0.0])))).clip_max([dyn float: 10])).otherwise(10.0).alias("texas_ratio")] 
        WITH_COLUMNS:
-       [col("REPDTE").dt.year().alias("year"), col("REPDTE").dt.quarter().alias("quarter")] 
-        SORT BY [col("CERT"), col("REPDTE")]
-          SELECT [col("CERT"), col("REPDTE"), col("ASSET"), col("EQ"), col("NCLNLS"), col("ORE"), col("LNATRES"), col("NETINC")]
-            FILTER col("YEAR") >= 2008
-            FROM
-              Parquet SCAN [/home/henry/Documents/backup/usb/UNI subject/4Term1/Big-data-4-fin/big_data_analysis4Fin/final/data/bronze/financials/YEAR=1984/part-0.parquet, ... 42 other sources]
-              PROJECT */34 COLUMNS
-              ESTIMATED ROWS: 1717675
+       [((col("year") * 4) + col("quarter").cast(Int32)).alias("qidx")] 
+         WITH_COLUMNS:
+         [col("REPDTE").dt.year().alias("year"), col("REPDTE").dt.quarter().alias("quarter")] 
+          SORT BY [col("CERT"), col("REPDTE")]
+            Parquet SCAN [/home/henry/Documents/backup/usb/UNI subject/4Term1/Big-data-4-fin/big_data_analysis4Fin/final/data/bronze/financials/YEAR=1984/part-0.parquet, ... 42 other sources]
+            PROJECT */34 COLUMNS
+            ESTIMATED ROWS: 1717675
 
-=== OPTIMIZED PLAN ===
+=== OPTIMIZED POLARS LAZY PLAN (PARTITION PRUNING YEAR>=2008 + PROJECT 8/34) ===
  WITH_COLUMNS:
  [when(col("qidx").shift([dyn int: 4]).over([col("CERT")]) == (col("qidx") - 4)).then(col("texas_ratio") - col("texas_ratio").shift([dyn int: 4]).over([col("CERT")])).otherwise(null.cast(Float64)).alias("d4_texas_ratio")] 
   simple π 15/15 ["CERT", "REPDTE", "ASSET", ... 12 other columns]

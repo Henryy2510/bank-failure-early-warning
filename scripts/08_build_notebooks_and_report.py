@@ -1,10 +1,11 @@
-"""Generate executed Jupyter notebooks and the complete English Report (Markdown + DOCX)."""
+"""Generate executed Jupyter notebooks and the complete English Report (Markdown + DOCX + LaTeX PDF)."""
 from __future__ import annotations
 
 import json
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -269,6 +270,14 @@ def _replace_sync_block(text: str, key: str, body: str) -> str:
     return pattern.sub(lambda _m: replacement, text, count=1)
 
 
+def _format_latex_sci(val: float) -> str:
+    """Format a small float cleanly as LaTeX scientific notation (e.g., 4.9 \\times 10^{-16})."""
+    if val == 0.0:
+        return "0.0"
+    mant_str, exp_str = f"{val:.1e}".split("e")
+    return f"{mant_str} \\times 10^{{{int(exp_str)}}}"
+
+
 def sync_benchmarks_into_docs() -> None:
     """Keep report.md and README.md wall-clock benchmark cells strictly aligned with latest measured CSV/JSON outputs."""
     tdir = out_dir("tables")
@@ -327,7 +336,7 @@ def sync_benchmarks_into_docs() -> None:
         f"identical numeric results ($2.24 \\times 10^{{-15}}$ yearly-sum parity, $0.000$ sample max diff) in **`{sp1['total_s']:.3f} s` at `1x`** (`{sp1['peak_rss_tree_mb']:,.1f} MB` "
         f"Python+JVM tree RSS) and **`{sp4['total_s']:.3f} s` at `4x` (`6.73M` rows, `{sp4['peak_rss_tree_mb']:,.1f} MB` tree RSS)**. A distributed Spark cluster is therefore **unnecessary** "
         f"for quarterly bank-level Call Reports (`<30M` rows fit comfortably in Polars on a laptop), and becomes justified only when expanding to ~2,400 regulatory schedules, "
-        f"borrower-level credit registries (`>10^8` rows), or high-frequency interbank settlement streams exceeding ~32–64 GB single-node memory."
+        f"borrower-level credit registries ($>10^8$ rows), or high-frequency interbank settlement streams exceeding ~32–64 GB single-node memory."
     )
 
     p1_table = "\n".join([
@@ -354,7 +363,7 @@ def sync_benchmarks_into_docs() -> None:
         f"| **`2x` (`3.37M`)** | **`{ps2['time_s']:.3f} s`** / `{int(ps2['peak_rss_mb']):,} MB` | `{pl2['time_s']:.3f} s` / `{int(pl2['peak_rss_mb']):,} MB` | `{pe2['time_s']:.3f} s` / `{int(pe2['peak_rss_mb']):,} MB` | **`{pd2['time_s']:.3f} s`** / `{int(pd2['peak_rss_mb']):,} MB` | — |\n"
         f"| **`4x` (`6.73M`)** | **`{ps4['time_s']:.3f} s`** / **`{int(ps4['peak_rss_mb']):,} MB`** | `{pl4['time_s']:.3f} s` / `{int(pl4['peak_rss_mb']):,} MB` | `{pe4['time_s']:.3f} s` / `{int(pe4['peak_rss_mb']):,} MB` | **`{pd4['time_s']:.3f} s`** / **`{int(pd4['peak_rss_mb']):,} MB`** | `{sp4['total_s']:.3f} s` (`{sp4['compute_s']:.3f} s` compute) / `{sp4['peak_rss_tree_mb']:,.1f} MB` |\n"
         f"| **`8x` (`13.46M`)** | **`{ps8['time_s']:.3f} s`** / `{int(ps8['peak_rss_mb']):,} MB` | `{pl8['time_s']:.3f} s` / **`{int(pl8['peak_rss_mb']):,} MB`** | *(skipped OOM risk)* | *(skipped vs eager overhead)* | — |\n\n"
-        f"*Numeric parity across all Polars, pandas, and PySpark runs:* max relative checksum difference $\\le {max_diff:.1e}$. Measuring across `1x–8x` (`13.46M` rows) reveals why scaling matters "
+        f"*Numeric parity across all Polars, pandas, and PySpark runs:* max relative checksum difference $\\le {_format_latex_sci(max_diff)}$. Measuring across `1x–8x` (`13.46M` rows) reveals why scaling matters "
         f"(`outputs/tables/part3_capacity_extrapolation.json`): **Polars Streaming** grows memory at just **`{ps_s['mb_per_million_rows']:.1f} MB / million rows`** "
         f"(`~{ps_s['rows_millions_until_16gb']:.1f}M`-row ceiling in `16 GB` RAM; `{ps_s['seconds_per_million_rows']:.3f} s / M rows`), whereas **Pandas + pushdown** grows at "
         f"**`{pd_s['mb_per_million_rows']:.1f} MB / million rows`** (`{slope_ratio:.2f}x` steeper RAM slope, exhausting `16 GB` by **`{pd_s['rows_millions_until_16gb']:.1f}M` rows**). "
@@ -378,8 +387,8 @@ def sync_benchmarks_into_docs() -> None:
 
     readme_bench = "\n".join([
         f"| **Part 1: Storage** | Hive-partitioned Parquet (`YEAR`, Zstd L3, write **{hive_r['write_s']:.3f} s**) reduces footprint from **{csv_r['size_mb']:.1f} MB** (CSV) to **{hive_r['size_mb']:.1f} MB** (**{hive_r['compression_vs_csv']:.2f}x compression**); `YEAR=2023` filter executes in **{hive_r['filter_2023_s']:.3f} s**. Quantifies `{f32['ASSET']['rows_exceeding_float32_exact_int_limit']:,}` `ASSET` rows exceeding Float32 exact-int limit (up to **$128k** quantization error), justifying `Float64`. |",
-        f"| **Part 2: Quality & Panel** | Resolves {len(dq['schema_drift_columns'])}-column schema drift, `P3ASSET` structural missingness, pre-1990 Basel zeroes (`{dq['validity']['pre1990_rbc1_zero_pct']}%`), **post-2020 CBLR `RBCRWAJ==0` (`{dq['validity']['era2020_rbcrwa_zero_pct']}%`, `{dq['validity']['era2020_rbcrwa_zero']:,}/{dq['validity']['era2020_rows']:,}` rows)**, negative stock anomalies (`ORE<0` `{dq['validity']['ore_negative']}`, `SC<0` `{dq['validity']['sc_negative']}`), YTD Q1->Q4 flow step-up (`{ytd['Q1']['median_intinc_to_asset']:.4f} -> {ytd['Q4']['median_intinc_to_asset']:.4f}`), and FDIC `CHANGEC1` exit mapping (`16,892` censored mergers vs. `2,859` failures vs. `4,313` active). Excludes {dq['failures']['share_last_report_not_scorable']}% non-scorable final quarters (`pit_scorable=False`). |",
-        f"| **Part 3: Processing** | Across **1x–8x (`1.68M–13.46M` rows)**: at `1x`, **Pandas + pushdown** (`{pd1['time_s']:.3f} s`, `{int(pd1['peak_rss_mb']):,} MB`) and **Polars Streaming** (`{ps1['time_s']:.3f} s`, `{int(ps1['peak_rss_mb']):,} MB`) lead; at **8x (`13.46M` rows)**, **Polars Streaming** completes in **`{ps8['time_s']:.3f} s`** (`{int(ps8['peak_rss_mb']):,} MB` RSS, scaling slope **`{ps_s['mb_per_million_rows']:.1f} MB / M rows`** -> `~{ps_s['rows_millions_until_16gb']:.1f}M` row limit in 16 GB RAM vs **`{pd_s['mb_per_million_rows']:.1f} MB / M rows`** -> `{pd_s['rows_millions_until_16gb']:.1f}M` for Pandas + pushdown). **PySpark `local[2]`** matches Polars with **$2.24 \\times 10^{{-15}}$ precision** (`{sp1['total_s']:.3f} s` / `{sp1['peak_rss_tree_mb']:,.1f} MB` tree RSS at `1x`; `{sp4['total_s']:.3f} s` / `{sp4['peak_rss_tree_mb']:,.1f} MB` at `4x`). |",
+        f"| **Part 2: Quality & Panel** | Resolves {len(dq['schema_drift_columns'])}-column schema drift, `P3ASSET` structural missingness, pre-1990 Basel zeroes (`{dq['validity']['pre1990_rbc1_zero_pct']}%`), **post-2020 CBLR `RBCRWAJ==0` (`{dq['validity']['era2020_rbcrwa_zero_pct']}%`, `{dq['validity']['era2020_rbcrwa_zero']:,}/{dq['validity']['era2020_rows']:,}` rows)**, negative stock anomalies (`ORE<0` `{dq['validity']['ore_negative']}`, `SC<0` `{dq['validity']['sc_negative']}`), YTD `Q1` $\\rightarrow$ `Q4` flow step-up (`{ytd['Q1']['median_intinc_to_asset']:.4f}` $\\rightarrow$ `{ytd['Q4']['median_intinc_to_asset']:.4f}`), and FDIC `CHANGEC1` exit mapping (`16,892` censored mergers vs. `2,859` failures vs. `4,313` active). Excludes {dq['failures']['share_last_report_not_scorable']}% non-scorable final quarters (`pit_scorable=False`). |",
+        f"| **Part 3: Processing** | Across **1x–8x (`1.68M–13.46M` rows)**: at `1x`, **Pandas + pushdown** (`{pd1['time_s']:.3f} s`, `{int(pd1['peak_rss_mb']):,} MB`) and **Polars Streaming** (`{ps1['time_s']:.3f} s`, `{int(ps1['peak_rss_mb']):,} MB`) lead; at **8x (`13.46M` rows)**, **Polars Streaming** completes in **`{ps8['time_s']:.3f} s`** (`{int(ps8['peak_rss_mb']):,} MB` RSS, scaling slope **`{ps_s['mb_per_million_rows']:.1f} MB / M rows`** $\\rightarrow$ `~{ps_s['rows_millions_until_16gb']:.1f}M` row limit in 16 GB RAM vs **`{pd_s['mb_per_million_rows']:.1f} MB / M rows`** $\\rightarrow$ `{pd_s['rows_millions_until_16gb']:.1f}M` for Pandas + pushdown). **PySpark `local[2]`** matches Polars with **$2.24 \\times 10^{{-15}}$ precision** (`{sp1['total_s']:.3f} s` / `{sp1['peak_rss_tree_mb']:,.1f} MB` tree RSS at `1x`; `{sp4['total_s']:.3f} s` / `{sp4['peak_rss_tree_mb']:,.1f} MB` at `4x`). |",
     ])
     readme_path = ROOT / "README.md"
     readme_txt = readme_path.read_text(encoding="utf-8")
@@ -404,176 +413,188 @@ def update_report_metadata() -> Path:
     return md_path
 
 
-def _clean_docx_text(s: str) -> str:
-    """Strip inline Markdown markers and expand HTTP links for crisp Word/PDF typesetting."""
-    s = s.replace("**", "").replace("`", "").replace("<br>", "\n").replace("$\\rightarrow$", "->")
-    s = re.sub(
-        r"\[([^\]]+)\]\((https?://[^)]+)\)",
-        lambda m: m.group(2) if m.group(1) in m.group(2) else f"{m.group(1)} ({m.group(2)})",
-        s,
-    )
-    return s
+_PANDOC_LUA_FILTER = r"""
+local function latex_escape_code(s)
+  local out = s:gsub("\\", "\\textbackslash{}")
+  out = out:gsub("([%%$&#{}])", "\\%1")
+  out = out:gsub("%^", "\\textasciicircum{}")
+  out = out:gsub("~", "\\textasciitilde{}")
+  out = out:gsub("_", "\\_\\allowbreak{}")
+  out = out:gsub("/", "/\\allowbreak{}")
+  return out
+end
+
+function Code(el)
+  if FORMAT:match "latex" and #el.text > 14 and (el.text:find("/") or el.text:find("_")) then
+    return pandoc.RawInline("latex", "\\texttt{" .. latex_escape_code(el.text) .. "}")
+  end
+end
+
+function Table(tbl)
+  local ncols = #tbl.colspecs
+  if ncols == 0 then return tbl end
+  local weights = {}
+  local min_chars = {}
+  for j = 1, ncols do
+    weights[j] = 4
+    min_chars[j] = 4
+  end
+  local function inspect_rows(rows)
+    for _, row in ipairs(rows or {}) do
+      for j, cell in ipairs(row.cells or {}) do
+        if j <= ncols then
+          local txt = pandoc.utils.stringify(cell.contents)
+          local len = math.min(#txt, 90)
+          if len > weights[j] then weights[j] = len end
+          for tok in txt:gmatch("%S+") do
+            if #tok > min_chars[j] and #tok <= 26 then
+              min_chars[j] = #tok
+            end
+          end
+        end
+      end
+    end
+  end
+  if tbl.head then inspect_rows(tbl.head.rows) end
+  for _, body in ipairs(tbl.bodies or {}) do
+    inspect_rows(body.head)
+    inspect_rows(body.body)
+  end
+  local sum_w = 0
+  local sw = {}
+  for j = 1, ncols do
+    sw[j] = math.max(math.sqrt(weights[j]), min_chars[j] * 0.42)
+    sum_w = sum_w + sw[j]
+  end
+  local min_w = (ncols <= 3) and 0.14 or 0.068
+  local total = 0
+  for j = 1, ncols do
+    local w = math.max(min_w, (sw[j] / sum_w) * 0.96)
+    sw[j] = w
+    total = total + w
+  end
+  for j = 1, ncols do
+    tbl.colspecs[j][2] = (sw[j] / total) * 0.96
+  end
+  if FORMAT:match "latex" then
+    local sz = (ncols >= 6) and "\\footnotesize" or "\\small"
+    local sep = (ncols >= 8) and "2.8pt" or "3.5pt"
+    return {
+      pandoc.RawBlock("latex", "{" .. sz .. "\\setlength{\\tabcolsep}{" .. sep .. "}"),
+      tbl,
+      pandoc.RawBlock("latex", "}"),
+    }
+  end
+  return tbl
+end
+
+function Image(img)
+  if FORMAT:match "latex" then
+    img.attributes["width"] = "90%"
+  elseif FORMAT:match "docx" then
+    img.attributes["width"] = "5.8in"
+  end
+  return img
+end
+"""
+
+_XELATEX_PREAMBLE = r"""
+\usepackage{float}
+\floatplacement{figure}{H}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xurl}
+\usepackage{fancyhdr}
+\usepackage{caption}
+\captionsetup{font={small,it},labelfont=bf}
+\linespread{1.15}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\emergencystretch=3em
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\footnotesize\textcolor{gray}{BFT65B — A Big-Data Pipeline for Bank Failure Early Warning}}
+\rhead{\footnotesize\textcolor{gray}{NEU Final Examination Report}}
+\cfoot{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{12pt}{5pt}
+\titlespacing*{\subsection}{0pt}{9pt}{3.5pt}
+\titlespacing*{\subsubsection}{0pt}{7pt}{2.5pt}
+"""
 
 
-def build_docx_report(md_path: Path) -> Path:
-    """Convert the Markdown report into a formatted Word (.docx) document with embedded figures and tables."""
-    from docx import Document
-    from docx.enum.table import WD_TABLE_ALIGNMENT
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Inches, Pt, RGBColor
+def _prepare_pandoc_markdown(md_path: Path) -> str:
+    """Clean Markdown metadata tags for Pandoc while preserving GitHub-compatible source."""
+    text = md_path.read_text(encoding="utf-8")
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    text = text.replace("<br>", "; ")
+    return text
 
-    doc = Document()
 
-    # Set margins
-    for section in doc.sections:
-        section.top_margin = Inches(0.65)
-        section.bottom_margin = Inches(0.65)
-        section.left_margin = Inches(0.65)
-        section.right_margin = Inches(0.65)
-
-    # Set default font
-    style = doc.styles["Normal"]
-    style.font.name = "Calibri"
-    style.font.size = Pt(9.5)
-    style.paragraph_format.space_after = Pt(2)
-    style.paragraph_format.line_spacing = 1.08
-
-    lines = md_path.read_text(encoding="utf-8").splitlines()
-    i = 0
-    in_code = False
-    code_buf = []
-
-    while i < len(lines):
-        line = lines[i]
-
-        # Fenced code blocks
-        if line.strip().startswith("```"):
-            if not in_code:
-                in_code = True
-                code_buf = []
-            else:
-                in_code = False
-                p = doc.add_paragraph()
-                run = p.add_run("\n".join(code_buf))
-                run.font.name = "Courier New"
-                run.font.size = Pt(8.5)
-            i += 1
-            continue
-
-        if in_code:
-            code_buf.append(line)
-            i += 1
-            continue
-
-        # Horizontal rule or invisible sync markers
-        if line.strip() == "---" or (line.strip().startswith("<!--") and line.strip().endswith("-->")):
-            i += 1
-            continue
-
-        # Image embedding: ![alt](../outputs/figures/xxx.png)
-        if line.strip().startswith("![") and "](" in line:
-            rel_p = line.split("](")[1].rstrip(")")
-            img_p = (md_path.parent / rel_p).resolve()
-            caption = line.split("![")[1].split("](")[0]
-            if img_p.exists():
-                p = doc.add_paragraph()
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                p.add_run().add_picture(str(img_p), width=Inches(4.35))
-                cap_p = doc.add_paragraph(f"Figure: {caption}")
-                cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                cap_p.runs[0].italic = True
-                cap_p.runs[0].font.size = Pt(8.5)
-                cap_p.paragraph_format.space_after = Pt(3)
-            i += 1
-            continue
-
-        # Markdown Table
-        if line.strip().startswith("|") and i + 1 < len(lines) and lines[i + 1].strip().startswith("|"):
-            tbl_lines = []
-            while i < len(lines) and lines[i].strip().startswith("|"):
-                tbl_lines.append(lines[i].strip())
-                i += 1
-            # Parse header and rows (skip separator row index 1)
-            rows_parsed = []
-            for idx, tl in enumerate(tbl_lines):
-                if idx == 1 and ("---" in tl or ":---" in tl):
-                    continue
-                cells = [_clean_docx_text(c.strip()) for c in tl.strip("|").split("|")]
-                rows_parsed.append(cells)
-            if rows_parsed:
-                n_cols = max(len(r) for r in rows_parsed)
-                table = doc.add_table(rows=len(rows_parsed), cols=n_cols)
-                table.style = "Table Grid"
-                table.alignment = WD_TABLE_ALIGNMENT.CENTER
-                for r_idx, r_data in enumerate(rows_parsed):
-                    for c_idx, val in enumerate(r_data):
-                        if c_idx < n_cols:
-                            cell = table.cell(r_idx, c_idx)
-                            cell.text = val
-                            for p in cell.paragraphs:
-                                p.paragraph_format.space_after = Pt(1)
-                                p.paragraph_format.line_spacing = 1.02
-                                for run in p.runs:
-                                    run.font.size = Pt(8.0)
-                                    if r_idx == 0:
-                                        run.bold = True
-                spacer = doc.add_paragraph()
-                spacer.paragraph_format.space_before = Pt(0)
-                spacer.paragraph_format.space_after = Pt(2)
-                spacer.paragraph_format.line_spacing = 1.0
-            continue
-
-        # Headings
-        if line.startswith("# "):
-            h = doc.add_heading(line[2:].strip(), level=0)
-            h.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        elif line.startswith("## "):
-            doc.add_heading(line[3:].strip(), level=1)
-        elif line.startswith("### "):
-            doc.add_heading(line[4:].strip(), level=2)
-        elif line.startswith("* ") or line.startswith("- ") or line.lstrip().startswith("* "):
-            clean_txt = _clean_docx_text(line.lstrip().lstrip("*- "))
-            doc.add_paragraph(clean_txt, style="List Bullet")
-        elif line.startswith("> "):
-            clean_txt = _clean_docx_text(line[2:].strip())
-            p = doc.add_paragraph(clean_txt)
-            p.runs[0].italic = True
-        elif line.strip():
-            clean_txt = _clean_docx_text(line.strip())
-            doc.add_paragraph(clean_txt)
-
-        i += 1
-
+def build_report_pdf_and_docx(md_path: Path) -> Path:
+    """Render report.md to native LaTeX PDF (via Pandoc + XeLaTeX) and Word DOCX (native OMML math)."""
+    pdf_path = md_path.parent / "BFT65B_Final_Report.pdf"
     docx_path = md_path.parent / "BFT65B_Final_Report.docx"
-    doc.save(str(docx_path))
-    log.info(f"Wrote Word DOCX report to {docx_path}")
-    try:
+    resource_path = f"{md_path.parent}:{out_dir('figures')}"
+
+    with tempfile.TemporaryDirectory(prefix="bfews_pandoc_") as tmpdir:
+        tmp = Path(tmpdir)
+        clean_md = tmp / "report_pandoc.md"
+        lua_filter = tmp / "filter.lua"
+        preamble = tmp / "preamble.tex"
+        clean_md.write_text(_prepare_pandoc_markdown(md_path), encoding="utf-8")
+        lua_filter.write_text(_PANDOC_LUA_FILTER.lstrip(), encoding="utf-8")
+        preamble.write_text(_XELATEX_PREAMBLE.lstrip(), encoding="utf-8")
+
         subprocess.run(
             [
-                "libreoffice",
-                "--headless",
-                "-env:UserInstallation=file:///tmp/lo_profile",
-                "--convert-to",
-                "pdf",
-                str(docx_path),
-                "--outdir",
-                str(md_path.parent),
+                "pandoc",
+                str(clean_md),
+                "--from=gfm+tex_math_dollars+implicit_figures",
+                "--pdf-engine=xelatex",
+                f"--lua-filter={lua_filter}",
+                f"--include-in-header={preamble}",
+                f"--resource-path={resource_path}",
+                "-V", "geometry:margin=0.72in",
+                "-V", "fontsize=11pt",
+                "-V", "mainfont=Noto Serif",
+                "-V", "sansfont=Noto Sans",
+                "-V", "monofont=Noto Sans Mono",
+                "-V", "colorlinks=true",
+                "-V", "linkcolor=blue",
+                "-V", "urlcolor=blue",
+                "-o", str(pdf_path),
             ],
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
         )
-        log.info(f"Converted DOCX to PDF at {md_path.parent / 'BFT65B_Final_Report.pdf'}")
-    except Exception as exc:
-        log.warning(f"LibreOffice PDF conversion skipped or failed: {exc}")
-    return docx_path
+        log.info(f"Compiled LaTeX PDF report via Pandoc + XeLaTeX to {pdf_path}")
+
+        subprocess.run(
+            [
+                "pandoc",
+                str(clean_md),
+                "--from=gfm+tex_math_dollars+implicit_figures",
+                f"--lua-filter={lua_filter}",
+                f"--resource-path={resource_path}",
+                "-o", str(docx_path),
+            ],
+            check=True,
+        )
+        log.info(f"Compiled Word DOCX (native math) report via Pandoc to {docx_path}")
+
+    return pdf_path
+
+
+build_docx_report = build_report_pdf_and_docx
 
 
 def main():
     build_notebooks()
     sync_benchmarks_into_docs()
     md_path = update_report_metadata()
-    build_docx_report(md_path)
+    build_report_pdf_and_docx(md_path)
 
 
 if __name__ == "__main__":

@@ -142,6 +142,10 @@ def main() -> None:
     pages = int(m.group(1))
     if pages > 20:
         raise AssertionError(f"Compiled PDF exceeds 20-page limit: {pages} pages")
+    pdf_txt = subprocess.run(["pdftotext", str(pdf_path), "-"], check=True, capture_output=True, text=True).stdout
+    raw_latex_leaks = [tok for tok in ("\\theta", "\\rightarrow", "\\mathcal{", "$y_{") if tok in pdf_txt]
+    if raw_latex_leaks:
+        raise AssertionError(f"Found unrendered LaTeX markup in compiled PDF: {raw_latex_leaks}")
 
     # 4. Forbidden stale numbers in report.md and README.md
     stale_tokens = [
