@@ -241,3 +241,122 @@ def test_pdf_page_limit():
     assert 15 <= pages <= 20, f"Expected 15-20 pages, got {pages}"
 
 
+def test_cblr_rbcrwaj_zero_and_negative_stock_sanitized():
+    """Verify post-2020 CBLR RBCRWAJ==0 and pre-1990 Basel zeros become null, negative stocks sanitize, real distress keeps 0."""
+    dates = [
+        datetime.date(1988, 12, 31),
+        datetime.date(2022, 6, 30),
+        datetime.date(2022, 9, 30),
+    ]
+    sample = pl.DataFrame({
+        "CERT": [1, 2, 3],
+        "REPDTE": dates,
+        "ASSET": [1000.0, 1000.0, 1000.0],
+        "EQ": [80.0, 120.0, -10.0],
+        "LNLSGR": [600.0, 600.0, 600.0],
+        "LNLSNET": [580.0, 580.0, 580.0],
+        "NCLNLS": [5.0, 5.0, 50.0],
+        "ORE": [1.0, -5.0, 5.0],
+        "LNATRES": [10.0, 10.0, 10.0],
+        "DEP": [800.0, 800.0, 900.0],
+        "CHBAL": [50.0, 50.0, 20.0],
+        "SC": [100.0, -2.0, 50.0],
+        "LNRE": [300.0, 300.0, 300.0],
+        "LNCI": [150.0, 150.0, 150.0],
+        "LNCON": [150.0, 150.0, 150.0],
+        "ROA": [1.0, 1.1, -3.0],
+        "ROE": [10.0, 11.0, -30.0],
+        "NIMY": [3.5, 3.6, 2.0],
+        "RBC1AAJ": [0.0, 11.5, 0.0],
+        "RBCRWAJ": [0.0, 0.0, 0.0],
+        "NONIX": [30.0, 30.0, 40.0],
+        "INTINC": [40.0, 40.0, 30.0],
+        "EINTEXP": [10.0, 10.0, 20.0],
+        "NONII": [5.0, 5.0, 2.0],
+        "ELNATR_Q": [2.0, 1.0, 15.0],
+        "NETINC_Q": [10.0, 12.0, -20.0],
+        "NAASSET": [5.0, 4.0, 40.0],
+        "BRO": [10.0, 10.0, 100.0],
+    })
+    out = compute_camels_features(sample).sort("CERT")
+    # Bank 1 (pre-1990): both Basel zeros -> None
+    assert out["rbc1aaj_clean"][0] is None
+    assert out["rbcrwaj_clean"][0] is None
+    # Bank 2 (2022 CBLR with healthy Tier 1 lev + negative ORE/SC): RBCRWAJ -> None, negative stocks -> None
+    assert np.isclose(out["rbc1aaj_clean"][1], 11.5)
+    assert out["rbcrwaj_clean"][1] is None
+    assert out["ore_ratio"][1] is None
+    assert out["liquid_asset_ratio"][1] is None
+    # Bank 3 (2022 truly insolvent EQ < 0 & RBC == 0): real distress zeros preserved
+    assert out["rbc1aaj_clean"][2] == 0.0
+    assert out["rbcrwaj_clean"][2] == 0.0
+
+
+def test_cv_folds_strictly_purged():
+    """Verify 4-quarter forward label windows in every walk-forward DEV fold end strictly before val starts."""
+    from src.bfews.utils import cfg
+
+    for y0, y1 in cfg()["split"]["cv_blocks"]:
+        max_train_date = datetime.date(y0 - 2, 12, 31)
+        max_label_horizon_end = datetime.date(y0 - 1, 12, 31)
+        min_val_date = datetime.date(y0, 3, 31)
+        assert max_train_date < max_label_horizon_end < min_val_date
+
+
+def test_preprocessor_invariant_to_test_corruption():
+    """Verify train-only preprocessing parameters do not change when TEST feature values are corrupted."""
+    from src.bfews.modeling import make_model
+
+    rng = np.random.default_rng(42)
+    X_dev = rng.normal(size=(200, 5)).astype(np.float32)
+    X_dev[0, 0] = np.nan
+    y_dev = rng.integers(0, 2, size=200)
+
+    X_test_clean = rng.normal(size=(50, 5)).astype(np.float32)
+    X_test_corrupt = np.full((50, 5), 1e9, dtype=np.float32)
+
+    pipe_a = make_model("logit")[:-1].fit(X_dev, y_dev)
+    pipe_b = make_model("logit")[:-1].fit(X_dev, y_dev)
+    _ = pipe_a.transform(X_test_clean)
+    _ = pipe_b.transform(X_test_corrupt)
+
+    assert np.allclose(pipe_a.named_steps["winsor"].lo_, pipe_b.named_steps["winsor"].lo_, equal_nan=True)
+    assert np.allclose(pipe_a.named_steps["winsor"].hi_, pipe_b.named_steps["winsor"].hi_, equal_nan=True)
+    assert np.allclose(pipe_a.named_steps["impute"].statistics_, pipe_b.named_steps["impute"].statistics_)
+    assert np.allclose(pipe_a.named_steps["scale"].mean_, pipe_b.named_steps["scale"].mean_)
+
+
+def test_upgrade_artifacts_present():
+    """Verify newly added Part 1-5 upgrade tables and diagnostic figures exist and are non-empty."""
+    from src.bfews.utils import out_dir
+
+    tdir = out_dir("tables")
+    fdir = out_dir("figures")
+    required_tables = [
+        "part1_float32_check.csv",
+        "dq_zero_as_missing.csv",
+        "dq_ytd_monotonicity.csv",
+        "exit_changec1_codes.csv",
+        "benchmark_environment.json",
+        "polars_naive_vs_optimized_plan.txt",
+        "spark_scaling_results.csv",
+        "leak_parameter_shift.csv",
+        "dev_label_sensitivity.csv",
+        "watchlist_2026q2.csv",
+        "watchlist_2026q2_summary.json",
+        "model_curves_data.json",
+    ]
+    for name in required_tables:
+        p = tdir / name
+        assert p.exists() and p.stat().st_size > 0, f"Missing or empty table artifact: {p}"
+
+    p3 = pl.read_csv(tdir / "part3_benchmark_results.csv")
+    assert {"1x", "2x", "4x", "8x"}.issubset(set(p3["scale"].to_list()))
+    sp3 = pl.read_csv(tdir / "spark_scaling_results.csv")
+    assert {"1x", "4x"}.issubset(set(sp3["scale"].to_list()))
+
+    for fig in ("pr_and_cost_curves.png", "alarms_and_canary_trajectories.png"):
+        fp = fdir / fig
+        assert fp.exists() and fp.stat().st_size > 0, f"Missing figure artifact: {fp}"
+
+

@@ -24,12 +24,20 @@ def main() -> None:
     exit_df = pl.read_csv(out_dir("tables") / "bank_exit_summary.csv")
     storage_df = pl.read_csv(out_dir("tables") / "part1_storage_benchmark.csv")
     bench_df = pl.read_csv(out_dir("tables") / "part3_benchmark_results.csv")
+    spark_bench_df = pl.read_csv(out_dir("tables") / "spark_scaling_results.csv")
     feat_imp_df = pl.read_csv(out_dir("tables") / "feature_importance.csv")
     canary_df = pl.read_csv(out_dir("tables") / "canary_case_studies.csv")
+    watchlist_summary = json.loads((out_dir("tables") / "watchlist_2026q2_summary.json").read_text(encoding="utf-8"))
+    dq_summary = json.loads((out_dir("tables") / "dq_summary.json").read_text(encoding="utf-8"))
     full_bench = {
         r["engine"]: r
-        for r in bench_df.filter(pl.col("slice") == "1984-2026 (full)").iter_rows(named=True)
+        for r in bench_df.filter(pl.col("scale") == "1x").iter_rows(named=True)
     }
+    bench_8x = {
+        r["engine"]: r
+        for r in bench_df.filter(pl.col("scale") == "8x").iter_rows(named=True)
+    }
+    spark_by_scale = {r["scale"]: r for r in spark_bench_df.iter_rows(named=True)}
 
     cost_cfg = test_res["cost_threshold_tuning"]
     t_eval = test_res["held_out_test_evaluation"]
@@ -38,23 +46,26 @@ def main() -> None:
 
     # 1. Required exact strings in report.md
     required_in_report = [
-        f"{cost_cfg['theta']:.4f}",  # 0.0026
-        f"{cost_cfg['dev_failing_banks_in_oof_blocks']:,}",  # 1,522
-        f"{cost_cfg['dev_failing_banks_all']:,}",  # 2,661
-        f"{cost_cfg['dev_oof_banks_caught_at_theta']:,}",  # 1,448
-        f"{t_eval['pr_auc']:.4f}",  # 0.5541
-        f"{t_eval['roc_auc']:.4f}",  # 0.9845
-        f"{t_eval['brier_score']:.5f}",  # 0.00238
-        f"{at_th['failing_banks_caught']} / {at_th['failing_banks']}",  # 471 / 485
-        f"{at_th['bank_recall'] * 100:.2f}%",  # 97.11%
-        f"{at_th['flagged_share_of_rows_pct']:.3f}%",  # 3.657%
-        f"{cap_by_pct[1]['failing_banks_caught']} / {cap_by_pct[1]['failing_banks']}",  # 401 / 485
-        f"{cap_by_pct[1]['bank_recall'] * 100:.2f}%",  # 82.68%
-        f"{cap_by_pct[2]['failing_banks_caught']} / {cap_by_pct[2]['failing_banks']}",  # 441 / 485
-        f"{cap_by_pct[5]['failing_banks_caught']} / {cap_by_pct[5]['failing_banks']}",  # 465 / 485
+        f"{cost_cfg['theta']:.4f}",
+        f"{cost_cfg['dev_failing_banks_in_oof_blocks']:,}",
+        f"{cost_cfg['dev_failing_banks_all']:,}",
+        f"{cost_cfg['dev_oof_banks_caught_at_theta']:,}",
+        f"{t_eval['pr_auc']:.4f}",
+        f"{t_eval['roc_auc']:.4f}",
+        f"{t_eval['brier_score']:.5f}",
+        f"{at_th['failing_banks_caught']} / {at_th['failing_banks']}",
+        f"{at_th['bank_recall'] * 100:.2f}%",
+        f"{at_th['flagged_share_of_rows_pct']:.3f}%",
+        f"{cap_by_pct[1]['failing_banks_caught']} / {cap_by_pct[1]['failing_banks']}",
+        f"{cap_by_pct[1]['bank_recall'] * 100:.2f}%",
+        f"{cap_by_pct[2]['failing_banks_caught']} / {cap_by_pct[2]['failing_banks']}",
+        f"{cap_by_pct[5]['failing_banks_caught']} / {cap_by_pct[5]['failing_banks']}",
         f"{full_bench['pandas + pushdown']['time_s']:.3f} s",
-        f"{full_bench['Polars lazy']['time_s']:.3f} s",
-        f"{full_bench['Polars streaming']['time_s']:.3f} s",
+        f"{bench_8x['Polars streaming']['time_s']:.3f} s",
+        f"{spark_by_scale['4x']['total_s']:.3f} s",
+        f"{dq_summary['validity']['era2020_rbcrwa_zero_pct']}%",
+        f"{watchlist_summary['banks_scored']:,}",
+        f"{watchlist_summary['flagged_at_theta']}",
     ]
 
     for row in cv_df.iter_rows(named=True):
@@ -99,18 +110,20 @@ def main() -> None:
 
     # 2. Required exact strings in README.md
     required_in_readme = [
-        f"{cost_cfg['theta']:.4f}",  # 0.0026
-        f"{cost_cfg['dev_failing_banks_in_oof_blocks']:,}",  # 1,522
-        f"{cost_cfg['dev_failing_banks_all']:,}",  # 2,661
-        f"{t_eval['pr_auc']:.4f}",  # 0.5541
-        f"{t_eval['roc_auc']:.4f}",  # 0.9845
-        f"{at_th['bank_recall'] * 100:.2f}%",  # 97.11%
+        f"{cost_cfg['theta']:.4f}",
+        f"{cost_cfg['dev_failing_banks_in_oof_blocks']:,}",
+        f"{cost_cfg['dev_failing_banks_all']:,}",
+        f"{t_eval['pr_auc']:.4f}",
+        f"{t_eval['roc_auc']:.4f}",
+        f"{at_th['bank_recall'] * 100:.2f}%",
         "425.7 MB",
         "154.1 MB",
         "2,859",
         "16,892",
         "4,313",
         f"{full_bench['pandas + pushdown']['time_s']:.3f} s",
+        f"{bench_8x['Polars streaming']['time_s']:.3f} s",
+        f"{watchlist_summary['banks_scored']:,}",
         *feat_imp_df.head(3)["feature"].to_list(),
         *repo_handles,
     ]
@@ -143,6 +156,16 @@ def main() -> None:
         "99.59%",
         "theta* = 0.010",
         "\\theta^* = 0.010",
+        "0.5541",
+        "0.9845",
+        "0.0026",
+        "471 / 485",
+        "97.11%",
+        "3.657%",
+        "0.4699",
+        "917,074",
+        "678,370",
+        "87,172",
     ]
     stale_found = [
         tok for tok in stale_tokens if (tok in report_txt or tok in readme_txt)

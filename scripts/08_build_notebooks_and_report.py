@@ -93,6 +93,8 @@ def build_notebooks():
                 "code",
                 "bench_df = pl.read_csv('../outputs/tables/part1_storage_benchmark.csv')\n"
                 "print(bench_df)\n"
+                "f32_df = pl.read_csv('../outputs/tables/part1_float32_check.csv')\n"
+                "print('\\n=== Float32 Precision Loss Check (Justifies Float64) ===')\nprint(f32_df)\n"
                 "bronze_files = list(Path('../data/bronze/financials').rglob('*.parquet'))\n"
                 "print(f'Bronze partition count: {len(bronze_files)} files across {len({p.parent for p in bronze_files})} year folders')",
             ),
@@ -119,6 +121,12 @@ def build_notebooks():
                 "code",
                 "exit_df = pl.read_csv('../outputs/tables/bank_exit_summary.csv')\n"
                 "print('=== Bank Exit Taxonomy ===')\nprint(exit_df)\n"
+                "print('\\n=== Zero-as-Missing by Era (incl. 2020+ CBLR) ===')\n"
+                "print(pl.read_csv('../outputs/tables/dq_zero_as_missing.csv'))\n"
+                "print('\\n=== Empirical YTD Monotonicity ===')\n"
+                "print(pl.read_csv('../outputs/tables/dq_ytd_monotonicity.csv'))\n"
+                "print('\\n=== Top FDIC CHANGEC1 Exit Codes ===')\n"
+                "print(pl.read_csv('../outputs/tables/exit_changec1_codes.csv').head(8))\n"
                 "panel_schema = pl.read_parquet_schema('../data/silver/panel.parquet')\n"
                 "print(f'Silver panel columns ({len(panel_schema)}):', list(panel_schema.keys())[:15], '...')",
             ),
@@ -138,13 +146,15 @@ def build_notebooks():
             (
                 "code",
                 "from pathlib import Path\nimport polars as pl\n\n"
-                "print('=== Polars Optimized Query Plan ===')\n"
-                "print(Path('../outputs/tables/polars_optimized_plan.txt').read_text())",
+                "print('=== Naive vs Optimized Polars Query Plan ===')\n"
+                "print(Path('../outputs/tables/polars_naive_vs_optimized_plan.txt').read_text())",
             ),
             (
                 "code",
                 "bench = pl.read_csv('../outputs/tables/part3_benchmark_results.csv')\n"
-                "print('=== Part 3 Scaling & Memory Benchmark ===')\nprint(bench)",
+                "print('=== Part 3 Multi-Scale (1x-8x) Benchmark ===')\nprint(bench)\n"
+                "print('\\n=== PySpark Multi-Scale (1x & 4x) Python+JVM RSS ===')\n"
+                "print(pl.read_csv('../outputs/tables/spark_scaling_results.csv'))",
             ),
             (
                 "code",
@@ -207,13 +217,17 @@ def build_notebooks():
                 "md",
                 "# Part 5: Expanding Walk-Forward Validation, Prior-Odds Calibration, Operating Points & Held-Out Test Evaluation\n"
                 "Compares supervisory baselines against regularized Logistic Regression, HistGradientBoosting, and PySpark MLlib, "
-                "presents both fixed-budget supervisory capacity operating points (Top 1%, 2%, 5% per quarter) and the prior-odds calibrated cost-minimizing threshold $\\theta^* = 0.0026$, and summarizes the 2009Q1–2025Q2 held-out test set.",
+                "presents fixed-budget supervisory capacity operating points (Top 1%, 2%, 5% per quarter), cost-minimizing threshold $\\theta^*$, empirical leakage parameter shift, and a live operational 2026Q2 watchlist.",
             ),
             (
                 "code",
                 "import json\nfrom pathlib import Path\nimport polars as pl\n\n"
                 "print('=== Walk-Forward Cross-Validation Comparison (DEV 1984-2007) ===')\n"
-                "print(pl.read_csv('../outputs/tables/cv_model_comparison.csv'))",
+                "print(pl.read_csv('../outputs/tables/cv_model_comparison.csv'))\n"
+                "print('\\n=== DEV Label Sensitivity (FAILURE+ASSISTANCE vs FAILURE-only) ===')\n"
+                "print(pl.read_csv('../outputs/tables/dev_label_sensitivity.csv'))\n"
+                "print('\\n=== Empirical Leakage Parameter Shift (DEV-only vs Naive Full) Top 8 ===')\n"
+                "print(pl.read_csv('../outputs/tables/leak_parameter_shift.csv').head(8))",
             ),
             (
                 "code",
@@ -232,17 +246,146 @@ def build_notebooks():
                 "print({k: t_eval[k] for k in ['pr_auc', 'roc_auc', 'recall_top_1pct', 'recall_top_5pct', 'brier_score', 'rows', 'positive_rows', 'failing_banks_total']})\n"
                 "print('\\n=== Held-Out Test Capacity Operating Points ===')\n"
                 "print(pl.DataFrame(t_eval['capacity_points']))\n"
-                "print('\\n=== Held-Out Test at Cost-Optimal Threshold (theta* = 0.0026) ===')\n"
+                "print('\\n=== Held-Out Test at Cost-Optimal Threshold ===')\n"
                 "print(t_eval['at_threshold'])\n"
                 "print('\\n=== Top 10 Strictly-DEV Feature Importance (HGB Permutation + Logit Coef) ===')\n"
                 "print(pl.read_csv('../outputs/tables/feature_importance.csv').head(10))\n"
                 "print('\\n=== Post-hoc Historical Canary Case Studies (Held-Out TEST Failures) ===')\n"
-                "print(pl.read_csv('../outputs/tables/canary_case_studies.csv'))",
+                "print(pl.read_csv('../outputs/tables/canary_case_studies.csv'))\n"
+                "print('\\n=== Operational 2026Q2 Top-10 Watchlist (Frozen DEV Model, Unlabelled Tail) ===')\n"
+                "print(pl.read_csv('../outputs/tables/watchlist_2026q2.csv').head(10))",
             ),
         ],
         nb_dir / "05_modelling_and_validation.ipynb",
     )
     log.info(f"Generated and executed 5 notebooks in {nb_dir}")
+
+
+def _replace_sync_block(text: str, key: str, body: str) -> str:
+    start_tag = f"<!-- SYNC:START:{key} -->"
+    end_tag = f"<!-- SYNC:END:{key} -->"
+    pattern = re.compile(rf"{re.escape(start_tag)}.*?{re.escape(end_tag)}", flags=re.DOTALL)
+    replacement = f"{start_tag}\n{body.strip()}\n{end_tag}"
+    return pattern.sub(lambda _m: replacement, text, count=1)
+
+
+def sync_benchmarks_into_docs() -> None:
+    """Keep report.md and README.md wall-clock benchmark cells strictly aligned with latest measured CSV/JSON outputs."""
+    tdir = out_dir("tables")
+    p1 = {r["format"]: r for r in pl.read_csv(tdir / "part1_storage_benchmark.csv").iter_rows(named=True)}
+    p3 = {(r["scale"], r["engine"]): r for r in pl.read_csv(tdir / "part3_benchmark_results.csv").iter_rows(named=True)}
+    cap = json.loads((tdir / "part3_capacity_extrapolation.json").read_text(encoding="utf-8"))
+    sp = {r["scale"]: r for r in pl.read_csv(tdir / "spark_scaling_results.csv").iter_rows(named=True)}
+    parity = json.loads((tdir / "spark_polars_parity.json").read_text(encoding="utf-8"))
+    f32 = {r["column"]: r for r in pl.read_csv(tdir / "part1_float32_check.csv").iter_rows(named=True)}
+    dq = json.loads((tdir / "dq_summary.json").read_text(encoding="utf-8"))
+    ytd = {r["quarter"]: r for r in pl.read_csv(tdir / "dq_ytd_monotonicity.csv").iter_rows(named=True)}
+    env = json.loads((tdir / "benchmark_environment.json").read_text(encoding="utf-8"))
+
+    csv_r = p1["CSV (uncompressed)"]
+    snappy_r = p1["Parquet single file, Snappy"]
+    zstd_r = p1["Parquet single file, Zstd-3"]
+    hive_r = p1["Parquet hive YEAR=, Zstd-3 (chosen)"]
+    pd_csv_r = p1["pandas.read_csv (CSV)"]
+    pd_pq_r = p1["pandas.read_parquet (single Zstd-3)"]
+
+    max_diff = max(r["max_rel_diff_vs_polars_lazy"] for r in p3.values())
+    ps_s = cap["Polars streaming"]
+    pd_s = cap["pandas + pushdown"]
+    ps8, pl8 = p3[("8x", "Polars streaming")], p3[("8x", "Polars lazy")]
+    ps1, pl1, pe1, pd1, pn1 = (
+        p3[("1x", "Polars streaming")],
+        p3[("1x", "Polars lazy")],
+        p3[("1x", "Polars eager")],
+        p3[("1x", "pandas + pushdown")],
+        p3[("1x", "pandas naive")],
+    )
+    ps2, pl2, pe2, pd2 = (
+        p3[("2x", "Polars streaming")],
+        p3[("2x", "Polars lazy")],
+        p3[("2x", "Polars eager")],
+        p3[("2x", "pandas + pushdown")],
+    )
+    ps4, pl4, pe4, pd4 = (
+        p3[("4x", "Polars streaming")],
+        p3[("4x", "Polars lazy")],
+        p3[("4x", "Polars eager")],
+        p3[("4x", "pandas + pushdown")],
+    )
+    sp1, sp4 = sp["1x"], sp["4x"]
+
+    q1_block = (
+        f"* **Q1 (Storage, Laptop Processing & When a Spark Cluster is Needed):**  \n"
+        f"  Four decades of quarterly bank reports (`1.68M` rows $\\times$ `33` fields) compress from **{csv_r['size_mb']:.1f} MB** in raw uncompressed CSV "
+        f"down to **{hive_r['size_mb']:.1f} MB** (`{hive_r['compression_vs_csv']:.2f}x` compression; write time **{hive_r['write_s']:.3f} s**) when stored as "
+        f"**Hive-partitioned Apache Parquet** (`YEAR=YYYY`) with **Zstandard (level 3)** compression, explicit canonical typing (`Int32` keys, `Date32`, `Float64` measures), "
+        f"and sorted `(REPDTE, CERT)` row groups. On our measured **1x–8x multi-scale stress test** (`1.68M` up to **`13.46M` rows**, `{env['cpu_logical']}` logical CPUs, "
+        f"`{env['ram_total_gb']:.2f} GB` RAM), **Polars Streaming** completes **`13.46M` rows in `{ps8['time_s']:.3f} s`** (`{int(ps8['peak_rss_mb']):,} MB` peak RSS) and "
+        f"**Polars Lazy** in `{pl8['time_s']:.3f} s` (`{int(pl8['peak_rss_mb']):,} MB`), scaling at only **`{ps_s['mb_per_million_rows']:.1f} MB / million rows`** "
+        f"(`~{ps_s['rows_millions_until_16gb']:.1f}M` rows capacity in `16 GB` RAM) compared with **`{pd_s['mb_per_million_rows']:.1f} MB / million rows`** for **Pandas + pushdown** "
+        f"(`{pd_s['rows_millions_until_16gb']:.1f}M` rows limit) and **`{int(pn1['peak_rss_mb']):,} MB`** at `1x` alone for **Pandas Naive**. Local **PySpark 4.3 (`local[2]`)** reproduces "
+        f"identical numeric results ($2.24 \\times 10^{{-15}}$ yearly-sum parity, $0.000$ sample max diff) in **`{sp1['total_s']:.3f} s` at `1x`** (`{sp1['peak_rss_tree_mb']:,.1f} MB` "
+        f"Python+JVM tree RSS) and **`{sp4['total_s']:.3f} s` at `4x` (`6.73M` rows, `{sp4['peak_rss_tree_mb']:,.1f} MB` tree RSS)**. A distributed Spark cluster is therefore **unnecessary** "
+        f"for quarterly bank-level Call Reports (`<30M` rows fit comfortably in Polars on a laptop), and becomes justified only when expanding to ~2,400 regulatory schedules, "
+        f"borrower-level credit registries (`>10^8` rows), or high-frequency interbank settlement streams exceeding ~32–64 GB single-node memory."
+    )
+
+    p1_table = "\n".join([
+        "| Storage Format & Layout | Disk Size (MB) | Compression | Write (s) | Full Scan (s) | 3-Col Proj (s) | `YEAR=2023` Filter (s) |",
+        "| :--- | :---: | :---: | :---: | :---: | :---: | :---: |",
+        f"| **Raw CSV (Uncompressed)** | `{csv_r['size_mb']:.1f}` | `{csv_r['compression_vs_csv']:.2f}x` | `{csv_r['write_s']:.3f}` | `{csv_r['full_read_s']:.3f}` | `{csv_r['read_3_cols_s']:.3f}` | `{csv_r['filter_2023_s']:.3f}` |",
+        f"| **Single Parquet (Snappy)** | `{snappy_r['size_mb']:.1f}` | `{snappy_r['compression_vs_csv']:.2f}x` | `{snappy_r['write_s']:.3f}` | `{snappy_r['full_read_s']:.3f}` | `{snappy_r['read_3_cols_s']:.3f}` | `{snappy_r['filter_2023_s']:.3f}` |",
+        f"| **Single Parquet (Zstd L3)** | `{zstd_r['size_mb']:.1f}` | `{zstd_r['compression_vs_csv']:.2f}x` | `{zstd_r['write_s']:.3f}` | `{zstd_r['full_read_s']:.3f}` | `{zstd_r['read_3_cols_s']:.3f}` | `{zstd_r['filter_2023_s']:.3f}` |",
+        f"| **Hive Parquet (`YEAR=`, Zstd L3, Chosen)** | **`{hive_r['size_mb']:.1f}`** | **`{hive_r['compression_vs_csv']:.2f}x`** | `{hive_r['write_s']:.3f}` | **`{hive_r['full_read_s']:.3f}`** | **`{hive_r['read_3_cols_s']:.3f}`** | **`{hive_r['filter_2023_s']:.3f}`** |",
+        f"| **Pandas Baseline (`read_csv` / `read_parquet`)** | `{pd_csv_r['size_mb']:.1f}` / `{pd_pq_r['size_mb']:.1f}` | `{pd_csv_r['compression_vs_csv']:.2f}x` / `{pd_pq_r['compression_vs_csv']:.2f}x` | — | `{pd_csv_r['full_read_s']:.3f}` / `{pd_pq_r['full_read_s']:.3f}` | — | — |",
+    ])
+
+    ram_pct_more = round((pd4["peak_rss_mb"] / ps4["peak_rss_mb"] - 1.0) * 100.0)
+    slope_ratio = pd_s["mb_per_million_rows"] / ps_s["mb_per_million_rows"]
+    spark_slowdown = sp4["total_s"] / ps4["time_s"]
+    p3_section = (
+        f"### 4.2 Multi-Scale Benchmark (`1x–8x`, Up to `13.46M` Rows) vs. Pandas & PySpark\n"
+        f"Tested on a Linux workstation (**`{env['cpu_physical']}` physical / `{env['cpu_logical']}` logical CPUs**, **`{env['ram_total_gb']:.2f} GB` RAM**, "
+        f"Polars `{env['polars']}`, pandas `{env['pandas']}`; `outputs/tables/benchmark_environment.json`), we avoid unreliable extrapolation from `<1.7M` sub-slices by generating "
+        f"disjoint replicated panels up to **`8x` (`13,460,928` rows)** in isolated `spawn` subprocesses (`outputs/tables/part3_benchmark_results.csv`, `spark_scaling_results.csv`):\n\n"
+        f"| Scale (`Rows`) | Polars (Streaming) Time / RSS | Polars (Lazy) Time / RSS | Polars (Eager) Time / RSS | Pandas + Pushdown Time / RSS | PySpark `local[2]` Time / Tree RSS |\n"
+        f"| :--- | :---: | :---: | :---: | :---: | :---: |\n"
+        f"| **`1x` (`1.68M`)** | **`{ps1['time_s']:.3f} s`** / `{int(ps1['peak_rss_mb']):,} MB` | `{pl1['time_s']:.3f} s` / `{int(pl1['peak_rss_mb']):,} MB` | `{pe1['time_s']:.3f} s` / **`{int(pe1['peak_rss_mb']):,} MB`** | **`{pd1['time_s']:.3f} s`** / `{int(pd1['peak_rss_mb']):,} MB` *(naive `{pn1['time_s']:.3f} s` / `{int(pn1['peak_rss_mb']):,} MB`)* | `{sp1['total_s']:.3f} s` (`{sp1['spark_startup_s']:.3f} s` JVM) / `{sp1['peak_rss_tree_mb']:,.1f} MB` |\n"
+        f"| **`2x` (`3.37M`)** | **`{ps2['time_s']:.3f} s`** / `{int(ps2['peak_rss_mb']):,} MB` | `{pl2['time_s']:.3f} s` / `{int(pl2['peak_rss_mb']):,} MB` | `{pe2['time_s']:.3f} s` / `{int(pe2['peak_rss_mb']):,} MB` | **`{pd2['time_s']:.3f} s`** / `{int(pd2['peak_rss_mb']):,} MB` | — |\n"
+        f"| **`4x` (`6.73M`)** | **`{ps4['time_s']:.3f} s`** / **`{int(ps4['peak_rss_mb']):,} MB`** | `{pl4['time_s']:.3f} s` / `{int(pl4['peak_rss_mb']):,} MB` | `{pe4['time_s']:.3f} s` / `{int(pe4['peak_rss_mb']):,} MB` | **`{pd4['time_s']:.3f} s`** / **`{int(pd4['peak_rss_mb']):,} MB`** | `{sp4['total_s']:.3f} s` (`{sp4['compute_s']:.3f} s` compute) / `{sp4['peak_rss_tree_mb']:,.1f} MB` |\n"
+        f"| **`8x` (`13.46M`)** | **`{ps8['time_s']:.3f} s`** / `{int(ps8['peak_rss_mb']):,} MB` | `{pl8['time_s']:.3f} s` / **`{int(pl8['peak_rss_mb']):,} MB`** | *(skipped OOM risk)* | *(skipped vs eager overhead)* | — |\n\n"
+        f"*Numeric parity across all Polars, pandas, and PySpark runs:* max relative checksum difference $\\le {max_diff:.1e}$. Measuring across `1x–8x` (`13.46M` rows) reveals why scaling matters "
+        f"(`outputs/tables/part3_capacity_extrapolation.json`): **Polars Streaming** grows memory at just **`{ps_s['mb_per_million_rows']:.1f} MB / million rows`** "
+        f"(`~{ps_s['rows_millions_until_16gb']:.1f}M`-row ceiling in `16 GB` RAM; `{ps_s['seconds_per_million_rows']:.3f} s / M rows`), whereas **Pandas + pushdown** grows at "
+        f"**`{pd_s['mb_per_million_rows']:.1f} MB / million rows`** (`{slope_ratio:.2f}x` steeper RAM slope, exhausting `16 GB` by **`{pd_s['rows_millions_until_16gb']:.1f}M` rows**). "
+        f"At `4x` (`6.73M`), `pandas + pushdown` is fast on pre-sorted 8-column slices (`{pd4['time_s']:.3f} s`), but already consumes `{ram_pct_more}%` more RAM than Polars "
+        f"(`{int(pd4['peak_rss_mb']):,} MB` vs `{int(ps4['peak_rss_mb']):,} MB`).\n\n"
+        f"![Multi-Scale Processing Time and Peak RSS Scaling (1x–8x)](../outputs/figures/part3_scaling_benchmark.png)\n\n"
+        f"### 4.3 PySpark Reproduction, Parity Verification & Cluster Justification\n"
+        f"In `scripts/06_spark.py` (`local[2]`, `1.2 GB` driver), Catalyst produces identical numeric outputs across all `43` years (`33,042` sampled rows: `0.0` abs diff; "
+        f"yearly sum diff $2.24 \\times 10^{{-15}}$). Reading `spark_execution_plan.txt` shows two `Exchange` shuffle barriers (`(CERT, YEAR)` followed by coarse `(CERT)` partitioning). "
+        f"Because `PySpark` incurs **{parity['timing_seconds']['spark_session_startup']:.2f} s JVM startup** and reaches `{sp4['total_s']:.3f} s` (`{sp4['peak_rss_tree_mb']:,.1f} MB` "
+        f"Python+JVM tree RSS) at `6.73M` rows vs `{ps4['time_s']:.3f} s` in Polars Streaming (**{spark_slowdown:.1f}x slower**), **a Spark cluster is unwarranted below ~30–50M rows**, "
+        f"becoming essential when wide schedules or loan-level credit registries overflow laptop RAM."
+    )
+
+    md_path = ROOT / "report" / "report.md"
+    txt = md_path.read_text(encoding="utf-8")
+    txt = _replace_sync_block(txt, "REPORT_Q1", q1_block)
+    txt = _replace_sync_block(txt, "REPORT_PART1_TABLE", p1_table)
+    txt = _replace_sync_block(txt, "REPORT_PART3_SECTION", p3_section)
+    md_path.write_text(txt, encoding="utf-8")
+
+    readme_bench = "\n".join([
+        f"| **Part 1: Storage** | Hive-partitioned Parquet (`YEAR`, Zstd L3, write **{hive_r['write_s']:.3f} s**) reduces footprint from **{csv_r['size_mb']:.1f} MB** (CSV) to **{hive_r['size_mb']:.1f} MB** (**{hive_r['compression_vs_csv']:.2f}x compression**); `YEAR=2023` filter executes in **{hive_r['filter_2023_s']:.3f} s**. Quantifies `{f32['ASSET']['rows_exceeding_float32_exact_int_limit']:,}` `ASSET` rows exceeding Float32 exact-int limit (up to **$128k** quantization error), justifying `Float64`. |",
+        f"| **Part 2: Quality & Panel** | Resolves {len(dq['schema_drift_columns'])}-column schema drift, `P3ASSET` structural missingness, pre-1990 Basel zeroes (`{dq['validity']['pre1990_rbc1_zero_pct']}%`), **post-2020 CBLR `RBCRWAJ==0` (`{dq['validity']['era2020_rbcrwa_zero_pct']}%`, `{dq['validity']['era2020_rbcrwa_zero']:,}/{dq['validity']['era2020_rows']:,}` rows)**, negative stock anomalies (`ORE<0` `{dq['validity']['ore_negative']}`, `SC<0` `{dq['validity']['sc_negative']}`), YTD Q1->Q4 flow step-up (`{ytd['Q1']['median_intinc_to_asset']:.4f} -> {ytd['Q4']['median_intinc_to_asset']:.4f}`), and FDIC `CHANGEC1` exit mapping (`16,892` censored mergers vs. `2,859` failures vs. `4,313` active). Excludes {dq['failures']['share_last_report_not_scorable']}% non-scorable final quarters (`pit_scorable=False`). |",
+        f"| **Part 3: Processing** | Across **1x–8x (`1.68M–13.46M` rows)**: at `1x`, **Pandas + pushdown** (`{pd1['time_s']:.3f} s`, `{int(pd1['peak_rss_mb']):,} MB`) and **Polars Streaming** (`{ps1['time_s']:.3f} s`, `{int(ps1['peak_rss_mb']):,} MB`) lead; at **8x (`13.46M` rows)**, **Polars Streaming** completes in **`{ps8['time_s']:.3f} s`** (`{int(ps8['peak_rss_mb']):,} MB` RSS, scaling slope **`{ps_s['mb_per_million_rows']:.1f} MB / M rows`** -> `~{ps_s['rows_millions_until_16gb']:.1f}M` row limit in 16 GB RAM vs **`{pd_s['mb_per_million_rows']:.1f} MB / M rows`** -> `{pd_s['rows_millions_until_16gb']:.1f}M` for Pandas + pushdown). **PySpark `local[2]`** matches Polars with **$2.24 \\times 10^{{-15}}$ precision** (`{sp1['total_s']:.3f} s` / `{sp1['peak_rss_tree_mb']:,.1f} MB` tree RSS at `1x`; `{sp4['total_s']:.3f} s` / `{sp4['peak_rss_tree_mb']:,.1f} MB` at `4x`). |",
+    ])
+    readme_path = ROOT / "README.md"
+    readme_txt = readme_path.read_text(encoding="utf-8")
+    readme_txt = _replace_sync_block(readme_txt, "README_BENCH", readme_bench)
+    readme_path.write_text(readme_txt, encoding="utf-8")
+    log.info("Synchronized report.md and README.md benchmark metrics from outputs/tables/.")
 
 
 def update_report_metadata() -> Path:
@@ -322,8 +465,8 @@ def build_docx_report(md_path: Path) -> Path:
             i += 1
             continue
 
-        # Horizontal rule
-        if line.strip() == "---":
+        # Horizontal rule or invisible sync markers
+        if line.strip() == "---" or (line.strip().startswith("<!--") and line.strip().endswith("-->")):
             i += 1
             continue
 
@@ -335,7 +478,7 @@ def build_docx_report(md_path: Path) -> Path:
             if img_p.exists():
                 p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                p.add_run().add_picture(str(img_p), width=Inches(4.7))
+                p.add_run().add_picture(str(img_p), width=Inches(4.35))
                 cap_p = doc.add_paragraph(f"Figure: {caption}")
                 cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 cap_p.runs[0].italic = True
@@ -428,6 +571,7 @@ def build_docx_report(md_path: Path) -> Path:
 
 def main():
     build_notebooks()
+    sync_benchmarks_into_docs()
     md_path = update_report_metadata()
     build_docx_report(md_path)
 
