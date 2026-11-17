@@ -12,13 +12,13 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
+from sklearn.metrics import average_precision_score, brier_score_loss, precision_recall_curve, roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from .core import texas_cap
 from .features import FEATURE_COLS_CAMELS
-from .io import parse_failures
+from .io import parse_failures, parse_institutions
 from .utils import cfg, data_dir, get_logger, out_dir, save_json
 
 log = get_logger("modeling")
@@ -271,7 +271,7 @@ class BankCostModel:
 def load_modeling_frame(gold_path: Path | None = None) -> pl.DataFrame:
     """DEV and TEST rows that could have been scored in real time (pit_scorable), features as Float32."""
     gold_path = gold_path or data_dir("gold") / "features.parquet"
-    cols = ["CERT", "REPDTE", "split_group", "target_fail_4q", "pit_scorable", "ASSET", "FAILDATE"] + FEATURE_COLS_CAMELS
+    cols = ["CERT", "REPDTE", "split_group", "target_fail_4q", "FAILTYPE", "pit_scorable", "ASSET", "FAILDATE"] + FEATURE_COLS_CAMELS
     return (pl.scan_parquet(gold_path)
             .filter(pl.col("split_group").is_in(["DEV", "TEST"]) & pl.col("pit_scorable"))
             .select(cols)
@@ -595,8 +595,203 @@ def capacity_operating_points(df: pl.DataFrame, p: np.ndarray, budgets_pct: list
     return out
 
 
+def compute_leakage_parameter_shift(df: pl.DataFrame) -> pl.DataFrame:
+    """Quantify median and upper-clip shifts if preprocessors were leaked across DEV+TEST instead of DEV-only."""
+    dev = df.filter(pl.col("split_group") == "DEV")
+    rows = []
+    for col in FEATURE_COLS_CAMELS:
+        s_dev = dev[col].drop_nulls().cast(pl.Float64).to_numpy()
+        s_all = df[col].drop_nulls().cast(pl.Float64).to_numpy()
+        s_dev = s_dev[np.isfinite(s_dev)]
+        s_all = s_all[np.isfinite(s_all)]
+        if len(s_dev) < 10 or len(s_all) < 10:
+            continue
+        med_d, q01_d, q99_d = float(np.median(s_dev)), float(np.quantile(s_dev, 0.01)), float(np.quantile(s_dev, 0.99))
+        med_a, q01_a, q99_a = float(np.median(s_all)), float(np.quantile(s_all, 0.01)), float(np.quantile(s_all, 0.99))
+        rel_med = abs(med_a - med_d) / max(abs(med_d), 1e-4) * 100.0
+        rel_q99 = abs(q99_a - q99_d) / max(abs(q99_d), 1e-4) * 100.0
+        rows.append({
+            "feature": col,
+            "dev_median": round(med_d, 5),
+            "full_median": round(med_a, 5),
+            "median_shift_pct": round(rel_med, 2),
+            "dev_q01": round(q01_d, 5),
+            "full_q01": round(q01_a, 5),
+            "dev_q99": round(q99_d, 5),
+            "full_q99": round(q99_a, 5),
+            "q99_shift_pct": round(rel_q99, 2),
+        })
+    out = pl.DataFrame(rows).sort("q99_shift_pct", descending=True)
+    out.write_csv(out_dir("tables") / "leak_parameter_shift.csv")
+    return out
+
+
+def run_dev_label_sensitivity(dev: pl.DataFrame, oof_primary: dict[str, np.ndarray]) -> pl.DataFrame:
+    """Compare primary DEV CV target (FAILURE + ASSISTANCE) vs strict closures-only (FAILURE) sensitivity."""
+    dev_fail_only = dev.with_columns(
+        pl.when((pl.col("target_fail_4q") == 1) & (pl.col("FAILTYPE") != "FAILURE"))
+        .then(pl.lit(0, dtype=pl.Int8))
+        .otherwise(pl.col("target_fail_4q"))
+        .alias("target_fail_4q")
+    )
+    _, oof_closure = run_walk_forward_cv(dev_fail_only, FEATURE_COLS_CAMELS, "hgb", explain_acc=None)
+    m_all = evaluate_predictions(oof_primary["y"], oof_primary["p"])
+    m_cls = evaluate_predictions(oof_closure["y"], oof_closure["p"])
+    rows = [
+        {"label_scope": "FAILURE + ASSISTANCE (Primary)", "oof_failing_banks": int(pl.DataFrame({"c": oof_primary["cert"], "y": oof_primary["y"]}).filter(pl.col("y") == 1)["c"].n_unique()), **m_all},
+        {"label_scope": "FAILURE only (Sensitivity)", "oof_failing_banks": int(pl.DataFrame({"c": oof_closure["cert"], "y": oof_closure["y"]}).filter(pl.col("y") == 1)["c"].n_unique()), **m_cls},
+    ]
+    tbl = pl.DataFrame(rows)
+    tbl.write_csv(out_dir("tables") / "dev_label_sensitivity.csv")
+    return tbl
+
+
+def score_latest_quarter(champion, theta: float, gold_path: Path | None = None) -> tuple[pl.DataFrame, dict[str, Any]]:
+    """Score the latest unlabelled POST_SAMPLE quarter (2026Q2) using the strictly DEV-trained champion."""
+    gold_path = gold_path or data_dir("gold") / "features.parquet"
+    lf = pl.scan_parquet(gold_path).filter(pl.col("split_group") == "POST_SAMPLE")
+    latest_q = lf.select(pl.col("REPDTE").max()).collect().item()
+    cols = ["CERT", "REPDTE", "STNAME", "ASSET", "pit_scorable"] + FEATURE_COLS_CAMELS
+    latest = (
+        lf.filter((pl.col("REPDTE") == latest_q) & pl.col("pit_scorable"))
+        .select(cols)
+        .with_columns([pl.col(c).cast(pl.Float32) for c in FEATURE_COLS_CAMELS])
+        .sort("CERT")
+        .collect()
+    )
+    probs = champion.predict_proba(latest.select(FEATURE_COLS_CAMELS).to_numpy())[:, 1]
+    inst = parse_institutions().select(["CERT", "NAME", "BKCLASS", "ACTIVE"]).unique(subset=["CERT"], keep="first")
+
+    n = latest.height
+    top1_cut = max(1, int(round(n * 0.01)))
+    top2_cut = max(1, int(round(n * 0.02)))
+    scored = (
+        latest.select(["CERT", "REPDTE", "STNAME", "ASSET", "texas_ratio", "eq_asset_ratio", "brokered_dep_ratio", "roa_ytd"])
+        .with_columns(pl.Series("prob_fail_4q", probs))
+        .sort("prob_fail_4q", descending=True)
+        .with_row_index("rank", offset=1)
+        .join(inst, on="CERT", how="left")
+        .sort("rank")
+        .with_columns(
+            (pl.col("prob_fail_4q") >= theta).alias("flag_theta"),
+            (pl.col("rank") <= top1_cut).alias("flag_top_1pct"),
+            (pl.col("rank") <= top2_cut).alias("flag_top_2pct"),
+            (pl.col("ASSET") / 1000.0).round(1).alias("assets_musd"),
+            pl.col("prob_fail_4q").round(4),
+            pl.col("texas_ratio").round(3),
+            (pl.col("eq_asset_ratio") * 100.0).round(2).alias("eq_asset_pct"),
+            (pl.col("brokered_dep_ratio") * 100.0).round(2).alias("brokered_dep_pct"),
+            pl.col("REPDTE").dt.strftime("%Y-%m-%d").alias("repdte"),
+        )
+    )
+    top25 = scored.head(25).select([
+        "rank", "CERT", "NAME", "STNAME", "BKCLASS", "repdte", "assets_musd",
+        "prob_fail_4q", "flag_theta", "flag_top_1pct", "texas_ratio", "eq_asset_pct", "brokered_dep_pct",
+    ])
+    top25.write_csv(out_dir("tables") / "watchlist_2026q2.csv")
+    summary = {
+        "quarter": str(latest_q),
+        "banks_scored": n,
+        "theta": round(theta, 4),
+        "flagged_at_theta": int(scored.filter(pl.col("flag_theta")).height),
+        "flagged_top_1pct": top1_cut,
+        "flagged_top_2pct": top2_cut,
+        "mean_prob": round(float(probs.mean()), 5),
+        "max_prob": round(float(probs.max()), 4),
+        "note": "Scored with strictly DEV-trained champion; labels >=2026Q3 are unobservable; NAME/BKCLASS from static institutions snapshot.",
+    }
+    save_json(summary, out_dir("tables") / "watchlist_2026q2_summary.json")
+    return top25, summary
+
+
+def _downsample_pr_curve(y: np.ndarray, p: np.ndarray, n_pts: int = 121) -> dict[str, list[float]]:
+    """Compute a smooth Precision-Recall curve sampled uniformly along recall [0, 1]."""
+    prec, rec, _ = precision_recall_curve(y, p)
+    rec_asc = rec[::-1]
+    prec_asc = prec[::-1]
+    idx = np.unique(np.clip(np.searchsorted(rec_asc, np.linspace(0.0, 1.0, n_pts), side="left"), 0, len(rec_asc) - 1))
+    return {
+        "recall": [round(float(x), 4) for x in rec_asc[idx]],
+        "precision": [round(float(x), 4) for x in prec_asc[idx]],
+    }
+
+
+def build_curves_payload(
+    test: pl.DataFrame,
+    y_test: np.ndarray,
+    preds_by_model: dict[str, np.ndarray],
+    cm: BankCostModel,
+    theta: float,
+    sens_costs: list[int],
+) -> dict[str, Any]:
+    """Export light JSON payload powering Part 5 PR curves, cost U-curve, alarms timeline & canary trajectories."""
+    pr_curves = {name: _downsample_pr_curve(y_test, p) for name, p in preds_by_model.items()}
+    p_hgb = preds_by_model["HistGradientBoosting, 26 CAMELS"]
+
+    grid = build_theta_grid()
+    cost_curves = {
+        str(c): [round(cm.total_cost(float(t), float(c)) / 1e3, 1) for t in grid]  # million USD
+        for c in sens_costs
+    }
+
+    test_q = (
+        test.select("CERT", "REPDTE", "target_fail_4q")
+        .with_columns(
+            pl.Series("flag_theta", p_hgb >= theta),
+        )
+        .group_by("REPDTE")
+        .agg(
+            pl.col("target_fail_4q").sum().cast(int).alias("pos_banks"),
+            pl.col("flag_theta").sum().cast(int).alias("alarms_theta"),
+            pl.len().alias("total_banks"),
+        )
+        .sort("REPDTE")
+        .with_columns(pl.col("REPDTE").dt.strftime("%Y-%m-%d").alias("repdte_str"))
+    )
+
+    canary_specs = [
+        (29776, "AmTrust Bank (2009)"),
+        (32102, "Doral Bank (2015)"),
+        (27332, "Republic Bank (2024)"),
+        (24735, "Silicon Valley Bank (2023)"),
+        (59017, "First Republic Bank (2023)"),
+    ]
+    scored_test = test.select("CERT", "REPDTE", "FAILDATE").with_columns(pl.Series("p", p_hgb))
+    trajectories = []
+    for cert_id, label in canary_specs:
+        sub = scored_test.filter(pl.col("CERT") == cert_id).sort("REPDTE").tail(8)
+        if sub.height:
+            q_before = list(range(-sub.height, 0))
+            trajectories.append({
+                "cert": cert_id,
+                "label": label,
+                "quarters_before_failure": q_before,
+                "repdte": sub["REPDTE"].dt.strftime("%Y-%m-%d").to_list(),
+                "prob": [round(float(x), 5) for x in sub["p"].to_list()],
+            })
+
+    payload = {
+        "theta": round(theta, 4),
+        "pr_curves": pr_curves,
+        "cost_u_curve": {
+            "theta_grid": [float(f"{t:.6g}") for t in grid],
+            "cost_musd_by_cfp": cost_curves,
+        },
+        "quarterly_alarms": {
+            "repdte": test_q["repdte_str"].to_list(),
+            "pos_banks": test_q["pos_banks"].to_list(),
+            "alarms_theta": test_q["alarms_theta"].to_list(),
+        },
+        "canary_trajectories": trajectories,
+    }
+    save_json(payload, out_dir("tables") / "model_curves_data.json")
+    return payload
+
+
 def execute_full_modeling_workflow(gold_path: Path | None = None) -> dict[str, Any]:
     df = load_modeling_frame(gold_path)
+    log.info("Computing empirical train-only vs naive-full leakage parameter shift audit...")
+    leak_shift_df = compute_leakage_parameter_shift(df)
     dev = df.filter(pl.col("split_group") == "DEV").sort("REPDTE")
     test = df.filter(pl.col("split_group") == "TEST").sort("REPDTE")
     del df
@@ -619,6 +814,9 @@ def execute_full_modeling_workflow(gold_path: Path | None = None) -> dict[str, A
         cv[name] = {**evaluate_predictions(oof["y"], oof["p"]), "folds": folds}
         if name == "HistGradientBoosting, 26 CAMELS":
             champion_oof = oof
+
+    log.info("Running DEV label sensitivity check (FAILURE + ASSISTANCE vs FAILURE only)...")
+    label_sens_df = run_dev_label_sensitivity(dev, champion_oof)
 
     feat_imp_df = summarize_dev_feature_importance(FEATURE_COLS_CAMELS, hgb_explain, logit_explain)
     feat_imp_csv = out_dir("tables") / "feature_importance.csv"
@@ -662,14 +860,36 @@ def execute_full_modeling_workflow(gold_path: Path | None = None) -> dict[str, A
     dev_capacity = capacity_operating_points(oof_df, champion_oof["p"])
 
     # ---- the one and only evaluation on the test period ------------------------------------------------------------
-    log.info("Fitting the champion on all DEV rows and scoring TEST once...")
+    log.info("Fitting DEV models once for held-out TEST evaluation & curve export...")
     feats = FEATURE_COLS_CAMELS
-    champion = make_model("hgb").fit(dev.select(feats).to_numpy(), dev["target_fail_4q"].to_numpy())
+    X_dev_all, y_dev_all = dev.select(feats).to_numpy(), dev["target_fail_4q"].to_numpy()
+    champion = make_model("hgb").fit(X_dev_all, y_dev_all)
     p_test = champion.predict_proba(test.select(feats).to_numpy())[:, 1]
     y_test = test["target_fail_4q"].to_numpy()
     p_texas = (make_model("texas")
-               .fit(dev.select(["texas_ratio"]).to_numpy(), dev["target_fail_4q"].to_numpy())
+               .fit(dev.select(["texas_ratio"]).to_numpy(), y_dev_all)
                .predict_proba(test.select(["texas_ratio"]).to_numpy())[:, 1])
+    p_logit3 = (make_model("logit")
+                .fit(dev.select(["eq_asset_ratio", "nclnls_ratio", "roa_ytd"]).to_numpy(), y_dev_all)
+                .predict_proba(test.select(["eq_asset_ratio", "nclnls_ratio", "roa_ytd"]).to_numpy())[:, 1])
+    p_logit26 = make_model("logit").fit(X_dev_all, y_dev_all).predict_proba(test.select(feats).to_numpy())[:, 1]
+
+    build_curves_payload(
+        test,
+        y_test,
+        {
+            "HistGradientBoosting, 26 CAMELS": p_test,
+            "Logistic, 26 CAMELS": p_logit26,
+            "Logistic, 3 variables": p_logit3,
+            "Texas ratio rule": p_texas,
+        },
+        cm,
+        theta,
+        cfg()["cost"]["sensitivity_false_alarm_kusd"],
+    )
+
+    log.info("Scoring unlabelled POST_SAMPLE latest quarter (2026Q2) operational watchlist...")
+    watchlist_df, watchlist_summary = score_latest_quarter(champion, theta, gold_path)
 
     years = test["REPDTE"].dt.year().to_numpy()
     gfc, modern = (years <= 2014), (years >= 2015)
@@ -704,6 +924,8 @@ def execute_full_modeling_workflow(gold_path: Path | None = None) -> dict[str, A
     }
     results = {
         "cross_validation_models": cv,
+        "dev_label_sensitivity": label_sens_df.to_dicts(),
+        "leakage_parameter_shift_top6": leak_shift_df.head(6).to_dicts(),
         "feature_importance_top10": feat_imp_df.head(top_k).to_dicts(),
         "cost_threshold_tuning": {
             "resolution_loss_rate": round(loss_rate, 4),
@@ -722,6 +944,10 @@ def execute_full_modeling_workflow(gold_path: Path | None = None) -> dict[str, A
             "sensitivity": sens,
         },
         "held_out_test_evaluation": test_eval,
+        "operational_watchlist_2026q2": {
+            "summary": watchlist_summary,
+            "top10": watchlist_df.head(10).to_dicts(),
+        },
     }
     save_json(results, out_dir("tables") / "test_results.json")
     log.info("Saved outputs/tables/test_results.json")

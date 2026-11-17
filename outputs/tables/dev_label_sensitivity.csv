@@ -1,0 +1,3 @@
+label_scope,oof_failing_banks,pr_auc,roc_auc,recall_top_1pct,recall_top_5pct,brier_score,positive_rows,rows
+FAILURE + ASSISTANCE (Primary),1522,0.4624,0.9851,0.7753,0.9504,0.00337,3547,760559
+FAILURE only (Sensitivity),1361,0.3878,0.9794,0.6842,0.9267,0.00334,3205,760559

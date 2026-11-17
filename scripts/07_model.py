@@ -1,14 +1,16 @@
 """Part 5: Model Training, Walk-Forward Validation, Cost-Sensitive Thresholding, and Test Set Evaluation."""
 from __future__ import annotations
 
+import json
 import sys, os
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib"
 
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import polars as pl
-from sklearn.metrics import precision_recall_curve, roc_curve
+from datetime import datetime
 
 from src.bfews.modeling import execute_full_modeling_workflow
 from src.bfews.utils import data_dir, df_to_markdown, get_logger, out_dir, save_json
@@ -186,6 +188,112 @@ def plot_feature_importance(results: dict):
     log.info(f"Saved feature importance figure to {out_fig}")
 
 
+def plot_pr_and_cost_curves(results: dict):
+    """Plot TEST Precision-Recall curves across models and DEV OOF Cost U-curve over theta."""
+    curves = json.loads((out_dir("tables") / "model_curves_data.json").read_text(encoding="utf-8"))
+    t_eval = results["held_out_test_evaluation"]
+    theta = curves["theta"]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.4, 4.5))
+    styles = {
+        "HistGradientBoosting, 26 CAMELS": ("#d9534f", "-", 2.4, f"HGB 26 (PR-AUC={t_eval['pr_auc']:.4f})"),
+        "Logistic, 26 CAMELS": ("#2b8cbe", "--", 1.8, "Logit 26 CAMELS"),
+        "Logistic, 3 variables": ("#5cb85c", "-.", 1.6, "Logit 3 variables"),
+        "Texas ratio rule": ("#f0ad4e", ":", 1.8, f"Texas Ratio Rule (PR-AUC={t_eval['texas_rule']['pr_auc']:.4f})"),
+    }
+    for name, (col, ls, lw, lbl) in styles.items():
+        if name in curves["pr_curves"]:
+            c = curves["pr_curves"][name]
+            ax1.plot(c["recall"], c["precision"], color=col, linestyle=ls, linewidth=lw, label=lbl)
+
+    at_th = t_eval["at_threshold"]
+    ax1.scatter(
+        [at_th["row_recall"]],
+        [at_th["precision_row"]],
+        color="#d9534f",
+        edgecolor="black",
+        s=70,
+        zorder=5,
+        label=f"theta*={theta:.4f} (Rec={at_th['row_recall']:.2f}, Prec={at_th['precision_row']:.2f})",
+    )
+    ax1.set_xlabel("Quarter-Row Recall on Held-Out TEST (2009–2025)")
+    ax1.set_ylabel("Precision")
+    ax1.set_title("Held-Out TEST Precision-Recall Curves")
+    ax1.set_xlim(0, 1.02)
+    ax1.set_ylim(0, 1.02)
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(loc="upper right", fontsize=8)
+
+    grid = curves["cost_u_curve"]["theta_grid"]
+    cost_colors = {"100": "#7bccc4", "250": "#d9534f", "500": "#2b8cbe", "1000": "#6a51a3"}
+    for c_str, costs_musd in curves["cost_u_curve"]["cost_musd_by_cfp"].items():
+        lw = 2.4 if c_str == "250" else 1.3
+        lbl = f"C_FP = ${c_str}k" + (" (baseline)" if c_str == "250" else "")
+        ax2.plot(grid, costs_musd, color=cost_colors.get(c_str, "grey"), linewidth=lw, label=lbl)
+
+    base_costs = curves["cost_u_curve"]["cost_musd_by_cfp"].get("250", [])
+    if base_costs:
+        min_idx = min(range(len(base_costs)), key=lambda i: base_costs[i])
+        ax2.scatter([grid[min_idx]], [base_costs[min_idx]], color="#d9534f", edgecolor="black", s=70, zorder=5,
+                    label=f"Min Cost @ theta*={theta:.4f}")
+    ax2.set_xscale("log")
+    ax2.set_xlabel("Alert Probability Threshold theta (log scale)")
+    ax2.set_ylabel("DEV OOF Total Cost ($ Millions, capped DIF + Exams)")
+    ax2.set_title("Cost-Sensitive Threshold Optimization (DEV OOF U-Curve)")
+    ax2.grid(True, which="both", alpha=0.25)
+    ax2.legend(loc="upper center", fontsize=7.8)
+
+    plt.tight_layout()
+    out_fig = out_dir("figures") / "pr_and_cost_curves.png"
+    plt.savefig(out_fig, dpi=200)
+    plt.close()
+    log.info(f"Saved PR & Cost U-curves figure to {out_fig}")
+
+
+def plot_alarms_and_canary_trajectories():
+    """Plot TEST quarterly alarms vs actual failure exposure and Canary bank pre-failure trajectories."""
+    curves = json.loads((out_dir("tables") / "model_curves_data.json").read_text(encoding="utf-8"))
+    qa = curves["quarterly_alarms"]
+    dates = [datetime.strptime(d, "%Y-%m-%d") for d in qa["repdte"]]
+    theta = curves["theta"]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.6, 4.5))
+    ax1.bar(dates, qa["alarms_theta"], width=70, color="#2b8cbe", alpha=0.65, label=f"Model Alarms (p >= {theta:.4f})")
+    ax1_r = ax1.twinx()
+    ax1_r.plot(dates, qa["pos_banks"], color="#d9534f", linewidth=2.0, label="Actual Failures in Next 4Q")
+    ax1.xaxis.set_major_locator(mdates.YearLocator(3))
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    ax1.set_xlabel("Held-Out TEST Quarter")
+    ax1.set_ylabel("Quarterly Alerts Flagged", color="#2b8cbe")
+    ax1_r.set_ylabel("True Positive Pre-Failure Banks", color="#d9534f")
+    ax1.set_title("Quarterly Model Alerts vs. True Failures (2009–2025)")
+    ax1.grid(True, alpha=0.25)
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax1_r.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2, loc="upper right", fontsize=8)
+
+    traj_colors = ["#d9534f", "#f0ad4e", "#2b8cbe", "#7f7f7f", "#9467bd"]
+    for idx, tr in enumerate(curves["canary_trajectories"]):
+        col = traj_colors[idx % len(traj_colors)]
+        ls = "--" if "Valley" in tr["label"] or "First Republic" in tr["label"] else "-"
+        ax2.plot(tr["quarters_before_failure"], tr["prob"], marker="o", markersize=4,
+                 color=col, linestyle=ls, linewidth=2.0, label=tr["label"])
+    ax2.axhline(theta, color="black", linestyle=":", linewidth=1.3, label=f"theta* = {theta:.4f}")
+    ax2.set_yscale("log")
+    ax2.set_ylim(2e-5, 1.0)
+    ax2.set_xlabel("Quarters Relative to Receivership (-1 = Last PIT Report)")
+    ax2.set_ylabel("Predicted 4Q Failure Probability (log scale)")
+    ax2.set_title("Canary Failure Risk Trajectories: Credit vs. Liquidity Runs")
+    ax2.grid(True, which="both", alpha=0.25)
+    ax2.legend(loc="upper left", fontsize=7.8)
+
+    plt.tight_layout()
+    out_fig = out_dir("figures") / "alarms_and_canary_trajectories.png"
+    plt.savefig(out_fig, dpi=200)
+    plt.close()
+    log.info(f"Saved quarterly alarms & canary trajectories figure to {out_fig}")
+
+
 def main():
     log.info("Starting Part 5: Full Modeling, Cross-Validation & Test Evaluation...")
     results = execute_full_modeling_workflow()
@@ -223,6 +331,8 @@ def main():
     plot_crisis_breakdown(results)
     plot_operating_points(results)
     plot_feature_importance(results)
+    plot_pr_and_cost_curves(results)
+    plot_alarms_and_canary_trajectories()
     log.info("Part 5 complete.")
 
 
