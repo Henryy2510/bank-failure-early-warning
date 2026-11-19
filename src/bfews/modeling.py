@@ -950,5 +950,87 @@ def execute_full_modeling_workflow(gold_path: Path | None = None) -> dict[str, A
         },
     }
     save_json(results, out_dir("tables") / "test_results.json")
-    log.info("Saved outputs/tables/test_results.json")
+    write_frozen_protocol(results)
+    log.info("Saved outputs/tables/test_results.json and outputs/tables/frozen_protocol.json")
     return results
+
+
+def write_frozen_protocol(results: dict[str, Any] | None = None) -> Path:
+    """Persist an auditable single-test frozen protocol manifest derived from config + DEV-only decisions."""
+    import hashlib
+    import json
+    from .features import FORBIDDEN_FEATURE_COLS
+
+    tdir = out_dir("tables")
+    test_path = tdir / "test_results.json"
+    if results is None:
+        results = json.loads(test_path.read_text(encoding="utf-8"))
+
+    c = cfg()
+    cost_cfg = results["cost_threshold_tuning"]
+    t_eval = results["held_out_test_evaluation"]
+
+    # Deterministic DEV-only cost-saving comparison vs. naive 0.50 & No-Alarm from saved DEV OOF curve
+    dev_cost_comparison: dict[str, Any] = {}
+    curves_path = tdir / "model_curves_data.json"
+    if curves_path.exists():
+        mc = json.loads(curves_path.read_text(encoding="utf-8"))
+        tg = mc["cost_u_curve"]["theta_grid"]
+        c250 = mc["cost_u_curve"]["cost_musd_by_cfp"]["250"]
+        i_opt = min(range(len(tg)), key=lambda i: abs(tg[i] - float(cost_cfg["theta"])))
+        i_50 = min(range(len(tg)), key=lambda i: abs(tg[i] - 0.50))
+        no_alarm = float(c250[-1])
+        opt_cost = float(c250[i_opt])
+        naive_cost = float(c250[i_50])
+        dev_cost_comparison = {
+            "cfp_kusd": 250.0,
+            "no_alarm_cost_musd": round(no_alarm, 1),
+            "naive_theta_grid": round(float(tg[i_50]), 4),
+            "naive_cost_musd": round(naive_cost, 1),
+            "naive_saving_vs_no_alarm_pct": round((1.0 - naive_cost / no_alarm) * 100.0, 2),
+            "optimal_theta": round(float(cost_cfg["theta"]), 4),
+            "optimal_cost_musd": round(opt_cost, 1),
+            "optimal_saving_vs_no_alarm_pct": round((1.0 - opt_cost / no_alarm) * 100.0, 2),
+            "optimal_saving_vs_naive_pct": round((1.0 - opt_cost / naive_cost) * 100.0, 2),
+        }
+
+    frozen_spec = {
+        "seed": int(c["seed"]),
+        "split": c["split"],
+        "publication_lag_days": int(c["panel"]["publication_lag_days"]),
+        "last_label_quarter": c["label"]["last_label_quarter"],
+        "feature_columns": list(FEATURE_COLS_CAMELS),
+        "forbidden_feature_columns": list(FORBIDDEN_FEATURE_COLS),
+        "champion_selection_metric": "DEV walk-forward OOF PR-AUC",
+        "champion_model": "HistGradientBoosting, 26 CAMELS",
+        "threshold_selection_rule": "Minimize DEV OOF expected supervisory loss over 300-point log grid",
+        "frozen_theta": float(cost_cfg["theta"]),
+        "cost_parameters": {
+            "resolution_loss_rate_dev": float(cost_cfg["resolution_loss_rate"]),
+            "asset_cap_kusd_dev_q85": float(cost_cfg["asset_cap_kusd"]),
+            "false_alarm_cost_kusd": float(cost_cfg["false_alarm_cost_kusd"]),
+            "episode_cost": bool(cost_cfg["episode_cost"]),
+        },
+        "dev_oof_cost_savings": dev_cost_comparison,
+    }
+    spec_bytes = json.dumps(frozen_spec, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    protocol_sha256 = hashlib.sha256(spec_bytes).hexdigest()
+    test_sha256 = hashlib.sha256(test_path.read_bytes()).hexdigest() if test_path.exists() else None
+
+    manifest = {
+        "protocol_version": "1.0",
+        "single_test_policy": "All feature design, model selection, calibration, and threshold choice frozen on DEV (1984Q1-2007Q4) before passive held-out TEST reporting (2009Q1-2025Q2).",
+        "frozen_spec": frozen_spec,
+        "protocol_sha256": protocol_sha256,
+        "held_out_test_summary": {
+            "pr_auc": float(t_eval["pr_auc"]),
+            "roc_auc": float(t_eval["roc_auc"]),
+            "brier_score": float(t_eval["brier_score"]),
+            "failing_banks_caught": int(t_eval["at_threshold"]["failing_banks_caught"]),
+            "failing_banks_total": int(t_eval["at_threshold"]["failing_banks"]),
+        },
+        "test_results_sha256": test_sha256,
+    }
+    out_p = tdir / "frozen_protocol.json"
+    save_json(manifest, out_p)
+    return out_p
