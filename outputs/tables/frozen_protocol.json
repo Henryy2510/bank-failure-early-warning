@@ -1,0 +1,110 @@
+{
+  "protocol_version": "1.0",
+  "single_test_policy": "All feature design, model selection, calibration, and threshold choice frozen on DEV (1984Q1-2007Q4) before passive held-out TEST reporting (2009Q1-2025Q2).",
+  "frozen_spec": {
+    "seed": 42,
+    "split": {
+      "dev_end": "2007-12-31",
+      "test_start": "2009-03-31",
+      "test_end": "2025-06-30",
+      "cv_blocks": [
+        [
+          1988,
+          1988
+        ],
+        [
+          1990,
+          1990
+        ],
+        [
+          1992,
+          1992
+        ],
+        [
+          1994,
+          1999
+        ],
+        [
+          2000,
+          2007
+        ]
+      ]
+    },
+    "publication_lag_days": 60,
+    "last_label_quarter": "2025-06-30",
+    "feature_columns": [
+      "eq_asset_ratio",
+      "rbc1aaj_clean",
+      "rbcrwaj_clean",
+      "cap_distress_flag",
+      "nclnls_ratio",
+      "naasset_ratio",
+      "ore_ratio",
+      "lnatres_ratio",
+      "texas_ratio",
+      "efficiency_ratio",
+      "roa_ytd",
+      "nimy_clean",
+      "provision_asset_ratio",
+      "netinc_q_asset_ratio",
+      "liquid_asset_ratio",
+      "brokered_dep_ratio",
+      "loan_to_deposit_ratio",
+      "re_loan_share",
+      "ci_loan_share",
+      "con_loan_share",
+      "log_asset",
+      "asset_growth_4q",
+      "loan_growth_4q",
+      "d4_texas_ratio",
+      "d4_nclnls_ratio",
+      "d4_eq_ratio"
+    ],
+    "forbidden_feature_columns": [
+      "FAILDATE",
+      "FAILTYPE",
+      "COST",
+      "RESTYPE",
+      "ACTIVE",
+      "ENDEFYMD",
+      "CHANGEC1",
+      "exit_status",
+      "has_failure_record",
+      "target_fail_4q",
+      "pit_scorable",
+      "label_complete",
+      "split_group",
+      "available_date"
+    ],
+    "champion_selection_metric": "DEV walk-forward OOF PR-AUC",
+    "champion_model": "HistGradientBoosting, 26 CAMELS",
+    "threshold_selection_rule": "Minimize DEV OOF expected supervisory loss over 300-point log grid",
+    "frozen_theta": 0.0039,
+    "cost_parameters": {
+      "resolution_loss_rate_dev": 0.1961,
+      "asset_cap_kusd_dev_q85": 474926.0,
+      "false_alarm_cost_kusd": 250.0,
+      "episode_cost": true
+    },
+    "dev_oof_cost_savings": {
+      "cfp_kusd": 250.0,
+      "no_alarm_cost_musd": 47352.9,
+      "naive_theta_grid": 0.5046,
+      "naive_cost_musd": 40460.8,
+      "naive_saving_vs_no_alarm_pct": 14.55,
+      "optimal_theta": 0.0039,
+      "optimal_cost_musd": 5419.0,
+      "optimal_saving_vs_no_alarm_pct": 88.56,
+      "optimal_saving_vs_naive_pct": 86.61
+    }
+  },
+  "protocol_sha256": "a0722b51d023b494ff18f454c035f5536a7848ea394eb0836337f2d987cd23a0",
+  "held_out_test_summary": {
+    "pr_auc": 0.5478,
+    "roc_auc": 0.9854,
+    "brier_score": 0.00238,
+    "failing_banks_caught": 469,
+    "failing_banks_total": 485
+  },
+  "test_results_sha256": "c7c25f4c28bf9a4df759aaf653d7e5fd6d2712a9ae1a4c8a725f28626344b701"
+}
