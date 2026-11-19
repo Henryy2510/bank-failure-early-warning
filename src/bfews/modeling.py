@@ -955,8 +955,87 @@ def execute_full_modeling_workflow(gold_path: Path | None = None) -> dict[str, A
     return results
 
 
+def cfp_stability_interval(results: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Decompose DEV OOF supervisory loss L(theta; C) = M(theta) + C * E(theta) to compute the exact C_FP stability interval."""
+    import json
+
+    tdir = out_dir("tables")
+    if results is None:
+        results = json.loads((tdir / "test_results.json").read_text(encoding="utf-8"))
+    mc = json.loads((tdir / "model_curves_data.json").read_text(encoding="utf-8"))
+    cost_cfg = results["cost_threshold_tuning"]
+
+    tg = np.asarray(mc["cost_u_curve"]["theta_grid"], dtype=float)
+    by_cfp = mc["cost_u_curve"]["cost_musd_by_cfp"]
+    c_vals = np.asarray(sorted(float(k) for k in by_cfp.keys()), dtype=float)
+    y_kusd = np.vstack([np.asarray(by_cfp[str(int(c))], dtype=float) * 1000.0 for c in c_vals])
+
+    # OLS slope/intercept across saved DEV OOF curves separates E(theta) and M(theta) cleanly despite 0.1 MUSD JSON rounding
+    c_bar = float(c_vals.mean())
+    e_hat = ((c_vals - c_bar)[:, None] * (y_kusd - y_kusd.mean(axis=0)[None, :])).sum(axis=0) / float(((c_vals - c_bar) ** 2).sum())
+    m_hat = y_kusd.mean(axis=0) - e_hat * c_bar
+
+    max_raw_err_kusd = 0.0
+    max_rounded_err_musd = 0.0
+    for idx, c_val in enumerate(c_vals):
+        pred_kusd = m_hat + c_val * e_hat
+        max_raw_err_kusd = max(max_raw_err_kusd, float(np.max(np.abs(pred_kusd - y_kusd[idx]))))
+        pred_musd_r = np.round(pred_kusd / 1000.0, 1)
+        max_rounded_err_musd = max(max_rounded_err_musd, float(np.max(np.abs(pred_musd_r - y_kusd[idx] / 1000.0))))
+
+    theta_star = float(cost_cfg["theta"])
+    i_star = int(np.argmin(np.abs(tg - theta_star)))
+    c_lo, c_hi = 0.0, float("inf")
+    for j in range(len(tg)):
+        if j == i_star:
+            continue
+        d_e = float(e_hat[i_star] - e_hat[j])
+        d_m = float(m_hat[j] - m_hat[i_star])
+        if abs(d_e) < 1e-6:
+            continue
+        ratio = d_m / d_e
+        if d_e > 0:
+            c_hi = min(c_hi, ratio)
+        else:
+            c_lo = max(c_lo, ratio)
+
+    n_dev_oof_fail = int(cost_cfg["dev_failing_banks_in_oof_blocks"])
+    n_dev_missed = n_dev_oof_fail - int(cost_cfg["dev_oof_banks_caught_at_theta"])
+    baseline_cfp = float(cost_cfg["false_alarm_cost_kusd"])
+    mean_dif_loss_all_kusd = float(m_hat[-1]) / max(1, n_dev_oof_fail)
+    mean_missed_loss_at_theta_kusd = float(m_hat[i_star]) / max(1, n_dev_missed)
+
+    payload = {
+        "partition": "DEV OOF only (1984Q1-2007Q4; TEST untouched)",
+        "theta_star": round(theta_star, 4),
+        "theta_star_grid": round(float(tg[i_star]), 8),
+        "baseline_cfp_kusd": baseline_cfp,
+        "cfp_lo_kusd": round(c_lo, 1),
+        "cfp_hi_kusd": round(c_hi, 1),
+        "stability_span_ratio": round(c_hi / max(1e-9, c_lo), 2),
+        "mean_dif_loss_per_dev_oof_failure_kusd": round(mean_dif_loss_all_kusd, 1),
+        "mean_missed_loss_at_theta_kusd": round(mean_missed_loss_at_theta_kusd, 1),
+        "implied_fn_fp_ratio_at_baseline": round(mean_dif_loss_all_kusd / baseline_cfp, 1),
+        "implied_fn_fp_ratio_range": [
+            round(mean_dif_loss_all_kusd / c_hi, 1),
+            round(mean_dif_loss_all_kusd / c_lo, 1),
+        ],
+        "max_curve_reconstruction_err_musd": round(max_rounded_err_musd, 6),
+        "max_raw_reconstruction_err_kusd": round(max_raw_err_kusd, 2),
+        "fdic_rms_reference": {
+            "source": "FDIC 2024 Annual Report & Proposed 2025 Operating Budget (fdic.gov)",
+            "rms_2024_ongoing_budget_musd": 703.0,
+            "rms_2024_safety_soundness_exams": 1200,
+            "gross_budget_per_ss_exam_kusd": 585.9,
+            "note": "Upper bound because RMS budget also covers specialty exams (IT/Trust/BSA) and off-site monitoring; targeted off-cycle exams naturally sit in $250k-$500k.",
+        },
+    }
+    save_json(payload, tdir / "cfp_stability_interval.json")
+    return payload
+
+
 def write_frozen_protocol(results: dict[str, Any] | None = None) -> Path:
-    """Persist an auditable single-test frozen protocol manifest derived from config + DEV-only decisions."""
+    """Persist an auditable manifest (SHA-256 fingerprints) of DEV-only decisions and test_results.json."""
     import hashlib
     import json
     from .features import FORBIDDEN_FEATURE_COLS
@@ -972,6 +1051,7 @@ def write_frozen_protocol(results: dict[str, Any] | None = None) -> Path:
 
     # Deterministic DEV-only cost-saving comparison vs. naive 0.50 & No-Alarm from saved DEV OOF curve
     dev_cost_comparison: dict[str, Any] = {}
+    cfp_stab: dict[str, Any] = {}
     curves_path = tdir / "model_curves_data.json"
     if curves_path.exists():
         mc = json.loads(curves_path.read_text(encoding="utf-8"))
@@ -993,6 +1073,13 @@ def write_frozen_protocol(results: dict[str, Any] | None = None) -> Path:
             "optimal_saving_vs_no_alarm_pct": round((1.0 - opt_cost / no_alarm) * 100.0, 2),
             "optimal_saving_vs_naive_pct": round((1.0 - opt_cost / naive_cost) * 100.0, 2),
         }
+        stab = cfp_stability_interval(results)
+        cfp_stab = {
+            "cfp_lo_kusd": stab["cfp_lo_kusd"],
+            "cfp_hi_kusd": stab["cfp_hi_kusd"],
+            "mean_dif_loss_per_dev_oof_failure_kusd": stab["mean_dif_loss_per_dev_oof_failure_kusd"],
+            "implied_fn_fp_ratio_at_baseline": stab["implied_fn_fp_ratio_at_baseline"],
+        }
 
     frozen_spec = {
         "seed": int(c["seed"]),
@@ -1012,14 +1099,15 @@ def write_frozen_protocol(results: dict[str, Any] | None = None) -> Path:
             "episode_cost": bool(cost_cfg["episode_cost"]),
         },
         "dev_oof_cost_savings": dev_cost_comparison,
+        "dev_oof_cfp_stability": cfp_stab,
     }
     spec_bytes = json.dumps(frozen_spec, sort_keys=True, separators=(",", ":")).encode("utf-8")
     protocol_sha256 = hashlib.sha256(spec_bytes).hexdigest()
     test_sha256 = hashlib.sha256(test_path.read_bytes()).hexdigest() if test_path.exists() else None
 
     manifest = {
-        "protocol_version": "1.0",
-        "single_test_policy": "All feature design, model selection, calibration, and threshold choice frozen on DEV (1984Q1-2007Q4) before passive held-out TEST reporting (2009Q1-2025Q2).",
+        "protocol_version": "1.1",
+        "single_test_policy": "Audit manifest recording the DEV-only specification (1984Q1-2007Q4) alongside passive held-out TEST summary (2009Q1-2025Q2). Documents configuration integrity; single-test discipline is enforced by DEV-only selection code and automated leakage tests.",
         "frozen_spec": frozen_spec,
         "protocol_sha256": protocol_sha256,
         "held_out_test_summary": {

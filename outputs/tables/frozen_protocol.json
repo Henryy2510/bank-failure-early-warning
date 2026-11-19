@@ -1,6 +1,6 @@
 {
-  "protocol_version": "1.0",
-  "single_test_policy": "All feature design, model selection, calibration, and threshold choice frozen on DEV (1984Q1-2007Q4) before passive held-out TEST reporting (2009Q1-2025Q2).",
+  "protocol_version": "1.1",
+  "single_test_policy": "Audit manifest recording the DEV-only specification (1984Q1-2007Q4) alongside passive held-out TEST summary (2009Q1-2025Q2). Documents configuration integrity; single-test discipline is enforced by DEV-only selection code and automated leakage tests.",
   "frozen_spec": {
     "seed": 42,
     "split": {
@@ -96,9 +96,15 @@
       "optimal_cost_musd": 5419.0,
       "optimal_saving_vs_no_alarm_pct": 88.56,
       "optimal_saving_vs_naive_pct": 86.61
+    },
+    "dev_oof_cfp_stability": {
+      "cfp_lo_kusd": 231.1,
+      "cfp_hi_kusd": 519.9,
+      "mean_dif_loss_per_dev_oof_failure_kusd": 31112.3,
+      "implied_fn_fp_ratio_at_baseline": 124.4
     }
   },
-  "protocol_sha256": "a0722b51d023b494ff18f454c035f5536a7848ea394eb0836337f2d987cd23a0",
+  "protocol_sha256": "c0d2e0b7680853db8d93fdaef7e3d06d0dcd9aef466f76c9ef823081066252ff",
   "held_out_test_summary": {
     "pr_auc": 0.5478,
     "roc_auc": 0.9854,

@@ -1,3 +1,5 @@
-scale,scale_factor,rows,engine,spark_startup_s,compute_s,total_s,peak_rss_tree_mb
-1x,1,1682616,PySpark local[2],3.554,6.638,10.192,1000.8
-4x,4,6730464,PySpark local[2],3.945,11.018,14.963,1772.8
+scale,scale_factor,rows,engine,threads,spark_startup_s,compute_s,total_s,peak_rss_tree_mb
+1x,1,1682616,PySpark local[2],2,3.792,6.825,10.617,1143.2
+1x,1,1682616,PySpark local[4],4,4.149,6.402,10.551,1262.9
+4x,4,6730464,PySpark local[2],2,3.972,12.191,16.163,1770.3
+4x,4,6730464,PySpark local[4],4,4.065,11.117,15.182,1807.8

@@ -183,11 +183,18 @@ def plot(res: pl.DataFrame, spark_df: pl.DataFrame | None = None) -> None:
         a1.plot(s["rows"] / 1e6, s["time_s"], marker=mk, linestyle=ls, color=col, lw=2, label=eng)
         a2.plot(s["rows"] / 1e6, s["peak_rss_mb"], marker=mk, linestyle=ls, color=col, lw=2, label=eng)
     if spark_df is not None and not spark_df.is_empty():
-        sd = spark_df.to_pandas().sort_values("rows")
-        a1.plot(sd["rows"] / 1e6, sd["total_s"], marker="*", markersize=9, linestyle="-.", color="#756bb1", lw=2,
-                label="PySpark (startup + compute)")
-        a2.plot(sd["rows"] / 1e6, sd["peak_rss_tree_mb"], marker="*", markersize=9, linestyle="-.", color="#756bb1", lw=2,
-                label="PySpark (Python + JVM RSS)")
+        sd_all = spark_df.to_pandas()
+        sp_sty = {
+            "PySpark local[4]": ("#756bb1", "*", "-.", 9),
+            "PySpark local[2]": ("#9e9ac8", "P", ":", 7),
+        }
+        for sp_eng in sd_all["engine"].unique():
+            sd = sd_all[sd_all["engine"] == sp_eng].sort_values("rows")
+            col, mk, ls, ms = sp_sty.get(sp_eng, ("#756bb1", "*", "-.", 8))
+            a1.plot(sd["rows"] / 1e6, sd["total_s"], marker=mk, markersize=ms, linestyle=ls, color=col, lw=2,
+                    label=f"{sp_eng} (startup + compute)")
+            a2.plot(sd["rows"] / 1e6, sd["peak_rss_tree_mb"], marker=mk, markersize=ms, linestyle=ls, color=col, lw=2,
+                    label=f"{sp_eng} (Python + JVM RSS)")
     a1.set_xlabel("Panel Rows (Millions, Synthetic Replication 1x–8x)")
     a1.set_ylabel("Wall-Clock Time (seconds, median)")
     a1.set_title("Multi-Scale Execution Time Scaling")

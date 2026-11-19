@@ -345,6 +345,7 @@ def test_upgrade_artifacts_present():
         "watchlist_2026q2.csv",
         "watchlist_2026q2_summary.json",
         "model_curves_data.json",
+        "cfp_stability_interval.json",
         "frozen_protocol.json",
     ]
     for name in required_tables:
@@ -355,6 +356,7 @@ def test_upgrade_artifacts_present():
     assert {"1x", "2x", "4x", "8x"}.issubset(set(p3["scale"].to_list()))
     sp3 = pl.read_csv(tdir / "spark_scaling_results.csv")
     assert {"1x", "4x"}.issubset(set(sp3["scale"].to_list()))
+    assert {"PySpark local[2]", "PySpark local[4]"}.issubset(set(sp3["engine"].to_list()))
 
     for fig in ("pr_and_cost_curves.png", "alarms_and_canary_trajectories.png"):
         fp = fdir / fig
@@ -412,6 +414,37 @@ def test_readme_download_command_paths_exist():
     assert "data/fdic_download_starter.py" not in readme, "Stale broken path data/fdic_download_starter.py in README.md"
     for rel in ("fdic_download_starter.py", "scripts/00_download.py", "run_all.sh", "requirements.txt", "config.yaml"):
         assert (ROOT / rel).exists(), f"Referenced file missing: {rel}"
+
+
+def test_cfp_interval_contains_baseline():
+    """Verify DEV OOF linear-cost decomposition reconstructs all saved U-curves and brackets C_FP = $250k."""
+    import json
+    from src.bfews.utils import out_dir
+
+    tdir = out_dir("tables")
+    stab = json.loads((tdir / "cfp_stability_interval.json").read_text(encoding="utf-8"))
+    mc = json.loads((tdir / "model_curves_data.json").read_text(encoding="utf-8"))
+    tr = json.loads((tdir / "test_results.json").read_text(encoding="utf-8"))
+
+    baseline = float(tr["cost_threshold_tuning"]["false_alarm_cost_kusd"])
+    assert stab["cfp_lo_kusd"] <= baseline <= stab["cfp_hi_kusd"], (
+        f"Baseline C_FP={baseline} outside stability interval [{stab['cfp_lo_kusd']}, {stab['cfp_hi_kusd']}]"
+    )
+    assert stab["cfp_lo_kusd"] <= 500.0 <= stab["cfp_hi_kusd"], "Sensitivity $500k should stay inside stability interval"
+    assert stab["max_curve_reconstruction_err_musd"] <= 1e-6, (
+        f"Linear decomposition reconstruction error too large: {stab['max_curve_reconstruction_err_musd']}"
+    )
+    # Cross-check OLS linearity directly from saved DEV OOF curves
+    by_cfp = mc["cost_u_curve"]["cost_musd_by_cfp"]
+    c_vals = np.array([100.0, 250.0, 500.0, 1000.0])
+    y_kusd = np.vstack([np.array(by_cfp[str(int(c))], dtype=float) * 1000.0 for c in c_vals])
+    c_bar = c_vals.mean()
+    e_hat = ((c_vals - c_bar)[:, None] * (y_kusd - y_kusd.mean(axis=0)[None, :])).sum(axis=0) / ((c_vals - c_bar) ** 2).sum()
+    m_hat = y_kusd.mean(axis=0) - e_hat * c_bar
+    for idx, c_val in enumerate(c_vals):
+        pred_musd = np.round((m_hat + c_val * e_hat) / 1000.0, 1)
+        assert np.max(np.abs(pred_musd - y_kusd[idx] / 1000.0)) <= 1e-6
+
 
 
 

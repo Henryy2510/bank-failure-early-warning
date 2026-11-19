@@ -29,6 +29,7 @@ def main() -> None:
     canary_df = pl.read_csv(out_dir("tables") / "canary_case_studies.csv")
     watchlist_summary = json.loads((out_dir("tables") / "watchlist_2026q2_summary.json").read_text(encoding="utf-8"))
     dq_summary = json.loads((out_dir("tables") / "dq_summary.json").read_text(encoding="utf-8"))
+    cfp_stab = json.loads((out_dir("tables") / "cfp_stability_interval.json").read_text(encoding="utf-8"))
     full_bench = {
         r["engine"]: r
         for r in bench_df.filter(pl.col("scale") == "1x").iter_rows(named=True)
@@ -37,7 +38,10 @@ def main() -> None:
         r["engine"]: r
         for r in bench_df.filter(pl.col("scale") == "8x").iter_rows(named=True)
     }
-    spark_by_scale = {r["scale"]: r for r in spark_bench_df.iter_rows(named=True)}
+    spark_by_key = {(r["scale"], r["engine"]): r for r in spark_bench_df.iter_rows(named=True)}
+    for req_k in (("1x", "PySpark local[2]"), ("4x", "PySpark local[2]"), ("1x", "PySpark local[4]"), ("4x", "PySpark local[4]")):
+        if req_k not in spark_by_key:
+            raise AssertionError(f"Missing expected PySpark benchmark row {req_k} in spark_scaling_results.csv")
 
     cost_cfg = test_res["cost_threshold_tuning"]
     t_eval = test_res["held_out_test_evaluation"]
@@ -62,12 +66,17 @@ def main() -> None:
         f"{cap_by_pct[5]['failing_banks_caught']} / {cap_by_pct[5]['failing_banks']}",
         f"{full_bench['pandas + pushdown']['time_s']:.3f} s",
         f"{bench_8x['Polars streaming']['time_s']:.3f} s",
-        f"{spark_by_scale['4x']['total_s']:.3f} s",
+        f"{spark_by_key[('4x', 'PySpark local[4]')]['total_s']:.3f} s",
+        f"{spark_by_key[('4x', 'PySpark local[2]')]['total_s']:.3f} s",
+        "local[4]",
         f"{dq_summary['validity']['era2020_rbcrwa_zero_pct']}%",
         f"{watchlist_summary['banks_scored']:,}",
         f"{watchlist_summary['flagged_at_theta']}",
         "2026-11-05",
         "frozen_protocol.json",
+        "cfp_stability_interval.json",
+        f"${cfp_stab['cfp_lo_kusd']:.1f}\\text{{k}}",
+        f"${cfp_stab['cfp_hi_kusd']:.1f}\\text{{k}}",
         "88.56%",
         "5,636",
     ]
@@ -177,6 +186,7 @@ def main() -> None:
         "678,370",
         "87,172",
         "data/fdic_download_starter.py",
+        "cryptographically locked",
     ]
     stale_found = [
         tok for tok in stale_tokens if (tok in report_txt or tok in readme_txt)

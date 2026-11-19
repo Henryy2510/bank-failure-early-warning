@@ -1,0 +1,25 @@
+{
+  "partition": "DEV OOF only (1984Q1-2007Q4; TEST untouched)",
+  "theta_star": 0.0039,
+  "theta_star_grid": 0.00386355,
+  "baseline_cfp_kusd": 250.0,
+  "cfp_lo_kusd": 231.1,
+  "cfp_hi_kusd": 519.9,
+  "stability_span_ratio": 2.25,
+  "mean_dif_loss_per_dev_oof_failure_kusd": 31112.3,
+  "mean_missed_loss_at_theta_kusd": 38616.2,
+  "implied_fn_fp_ratio_at_baseline": 124.4,
+  "implied_fn_fp_ratio_range": [
+    59.8,
+    134.6
+  ],
+  "max_curve_reconstruction_err_musd": 0.0,
+  "max_raw_reconstruction_err_kusd": 32.66,
+  "fdic_rms_reference": {
+    "source": "FDIC 2024 Annual Report & Proposed 2025 Operating Budget (fdic.gov)",
+    "rms_2024_ongoing_budget_musd": 703.0,
+    "rms_2024_safety_soundness_exams": 1200,
+    "gross_budget_per_ss_exam_kusd": 585.9,
+    "note": "Upper bound because RMS budget also covers specialty exams (IT/Trust/BSA) and off-site monitoring; targeted off-cycle exams naturally sit in $250k-$500k."
+  }
+}

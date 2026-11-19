@@ -12,15 +12,19 @@ from .utils import cfg, data_dir, get_logger
 log = get_logger("spark")
 
 
-def get_spark_session(app_name: str = "BFT65B-BankFailurePipeline"):
+def get_spark_session(app_name: str = "BFT65B-BankFailurePipeline", master: str | None = None):
     """Local SparkSession with a conservative memory configuration for a laptop."""
+    import re
     from pyspark.sql import SparkSession
 
     s = cfg()["spark"]
-    return (SparkSession.builder.appName(app_name).master(s["master"])
+    m = master or s["master"]
+    match = re.fullmatch(r"local\[(\d+)\]", m.strip())
+    default_par = match.group(1) if match else "4"
+    return (SparkSession.builder.appName(app_name).master(m)
             .config("spark.driver.memory", s["driver_memory"])
             .config("spark.sql.shuffle.partitions", str(s["shuffle_partitions"]))
-            .config("spark.default.parallelism", "4")
+            .config("spark.default.parallelism", default_par)
             .config("spark.sql.adaptive.enabled", "true")
             .config("spark.ui.enabled", "false")
             .config("spark.driver.extraJavaOptions", "-XX:+UseG1GC -Dderby.system.home=/tmp/derby")

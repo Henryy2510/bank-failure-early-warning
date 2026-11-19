@@ -84,13 +84,13 @@ final/
 ├── outputs/                           # Committed empirical outputs (tables, figures, DQ report)
 │   ├── dq_report/data_quality_report.md
 │   ├── figures/                       # 9 high-resolution PNG figures (200 DPI, incl. PR/Cost U-curves & Canary trajectories)
-│   └── tables/                        # Multi-scale & Spark benchmarks, Float32/CBLR/YTD/CHANGEC1 audits, leakage shift, frozen_protocol, watchlist_2026q2, test_results
+│   └── tables/                        # Multi-scale & Spark benchmarks (local[2] & local[4]), Float32/CBLR/YTD/CHANGEC1 audits, leakage shift, cfp_stability_interval, frozen_protocol, watchlist_2026q2, test_results
 ├── report/                            # Final Research Report deliverables
 │   ├── report.md                      # Full English report in GitHub Markdown
 │   ├── BFT65B_Final_Report.docx       # Formatted Word document with embedded tables and figures
 │   └── BFT65B_Final_Report.pdf        # Final PDF report (<= 20 pages)
 └── tests/
-    └── test_pipeline.py               # Automated pytest suite (19 tests: completeness, de-YTD, CBLR zero-fix, forbidden cols, post-failure filter, CV purge, leakage invariance, frozen protocol, parity, README paths, PDF pages)
+    └── test_pipeline.py               # Automated pytest suite (20 tests: completeness, de-YTD, CBLR zero-fix, forbidden cols, post-failure filter, CV purge, leakage invariance, C_FP stability interval, frozen_protocol manifest, Spark local[2]/local[4] parity, non-degenerate cost threshold, README paths, PDF pages)
 ```
 
 > **Note on Data Files:** Per course submission rules, `data/` (`bronze/`, `silver/`, `gold/`) and `*.parquet` files are excluded via `.gitignore` and are not committed to Git.
@@ -137,7 +137,7 @@ This script runs Steps `00` through `09`, logs per-step wall-clock times to `out
 * **Step 7 (`07_model.py`):** Runs 5-fold expanding walk-forward CV on `DEV` (`760,559` OOF rows, `1,522` OOF failing banks; `2,661` total `DEV` failing banks), audits leakage shifts & `FAILURE`-only label sensitivity, calibrates cost-optimal threshold ($\theta^* = 0.0039$), computes capacity budgets (`Top 1%, 2%, 5%`), evaluates once on `TEST`, scores `2026Q2` live operational watchlist (`watchlist_2026q2.csv`), and plots curves & trajectories.
 * **Step 8 (`08_build_notebooks_and_report.py`):** Executes `notebooks/*.ipynb` via `nbclient` and regenerates `report/BFT65B_Final_Report.docx` and `.pdf`.
 * **Step 9 (`09_check_report_numbers.py`):** Verifies that all key metrics in `report/report.md` and `README.md` match the generated JSON/CSV files.
-* **Tests (`pytest tests/`):** Runs 19 automated unit/integration tests verifying manifest completeness, YTD de-cumulation, CBLR zero recoding & negative stock sanitization, forbidden outcome column exclusion, zero post-failure Gold rows, strict CV purges, preprocessor leakage invariance, `frozen_protocol.json` SHA-256 lock, Polars–PySpark parity, non-degenerate cost threshold, capacity points, explainability, Canary studies, upgraded artifacts, README script paths, and the 20-page PDF limit.
+* **Tests (`pytest tests/`):** Runs 20 automated unit/integration tests verifying manifest completeness, YTD de-cumulation, CBLR zero recoding & negative stock sanitization, forbidden outcome column exclusion, zero post-failure Gold rows, strict CV purges, preprocessor leakage invariance, `cfp_stability_interval.json` linear-cost decomposition, `frozen_protocol.json` audit manifest SHA-256 fingerprints, Polars–PySpark parity (`local[2]` & `local[4]`), non-degenerate cost threshold, capacity points, explainability, Canary studies, upgraded artifacts, README script paths, and the 20-page PDF limit.
 
 ---
 
@@ -148,7 +148,7 @@ This script runs Steps `00` through `09`, logs per-step wall-clock times to `out
 <!-- SYNC:START:README_BENCH -->
 | **Part 1: Storage** | Hive-partitioned Parquet (`YEAR`, Zstd L3, write **0.922 s**) reduces footprint from **425.7 MB** (CSV) to **154.1 MB** (**2.76x compression**); `YEAR=2023` filter executes in **0.040 s**. Quantifies `11,485` `ASSET` rows exceeding Float32 exact-int limit (up to **$128k** quantization error), justifying `Float64`. |
 | **Part 2: Quality & Panel** | Resolves 14-column schema drift, `P3ASSET` structural missingness, pre-1990 Basel zeroes (`18.13%`), **post-2020 CBLR `RBCRWAJ==0` (`37.15%`, `45,865/123,461` rows)**, negative stock anomalies (`ORE<0` `646`, `SC<0` `96`), YTD `Q1` $\rightarrow$ `Q4` flow step-up (`0.0177` $\rightarrow$ `0.0689`), and FDIC `CHANGEC1` exit mapping (`16,892` censored mergers vs. `2,859` failures vs. `4,313` active). Excludes 59.1% non-scorable final quarters (`pit_scorable=False`). |
-| **Part 3: Processing** | Across **1x–8x (`1.68M–13.46M` rows)**: at `1x`, **Pandas + pushdown** (`0.482 s`, `1,044 MB`) and **Polars Streaming** (`0.619 s`, `1,268 MB`) lead; at **8x (`13.46M` rows)**, **Polars Streaming** completes in **`4.271 s`** (`2,499 MB` RSS, scaling slope **`101.0 MB / M rows`** $\rightarrow$ `~151.1M` row limit in 16 GB RAM vs **`327.9 MB / M rows`** $\rightarrow$ `48.5M` for Pandas + pushdown). **PySpark `local[2]`** matches Polars with **$2.24 \times 10^{-15}$ precision** (`10.192 s` / `1,000.8 MB` tree RSS at `1x`; `14.963 s` / `1,772.8 MB` at `4x`). |
+| **Part 3: Processing** | Across **1x–8x (`1.68M–13.46M` rows)** (`POLARS_MAX_THREADS=4`): at `1x`, **Pandas + pushdown** (`0.482 s`, `1,044 MB`) and **Polars Streaming** (`0.619 s`, `1,268 MB`) lead; at **8x (`13.46M` rows)**, **Polars Streaming** completes in **`4.271 s`** (`2,499 MB` RSS, scaling slope **`101.0 MB / M rows`** $\rightarrow$ `~151.1M` row limit in 16 GB RAM vs **`327.9 MB / M rows`** $\rightarrow$ `48.5M` for Pandas + pushdown). At equal 4 threads, **PySpark `local[4]`** matches Polars with **$7.4 \times 10^{-15}$ precision** (`10.551 s` / `1,262.9 MB` tree RSS at `1x`; `15.182 s` / `1,807.8 MB` at `4x`; `local[2]`: `16.163 s`). |
 <!-- SYNC:END:README_BENCH -->
 | **Part 4: Features** | 26 point-in-time CAMELS + Texas Ratio + 4Q lag features with CBLR zero-fix & negative stock cleaning; naive full-sample fit shifts upper quantiles up to `20.95%`; invariance & CV purge verified via `pytest`. |
 | **Part 5: Modelling** | Walk-forward CV PR-AUC (`760,559` OOF rows, `1,522` OOF failing banks): `HistGradientBoosting, 26 CAMELS` (**0.4624**, ROC **0.9851**, Brier **0.00337**) > `Logistic, 3 variables` (**0.4015**) > `Logistic, 26 CAMELS` (**0.3601**) > `Texas ratio rule` (**0.2642**). Held-out `TEST` (`2009Q1–2025Q2`, `400,332` rows, `485` failing banks): **PR-AUC = 0.5478**, **ROC-AUC = 0.9854**, **Brier = 0.00238**, **Recall@Top-1% = 83.53%**, **Recall@Top-5% = 95.60%** (Modern `2015–2025` ROC-AUC lifted to **0.9193**). Top strictly-`DEV` risk drivers (`feature_importance.csv`): **`texas_ratio`** (`+0.26242` $\Delta\text{PR-AUC}$), **`d4_eq_ratio`** (`+0.06486`), **`eq_asset_ratio`** (`+0.06167`). Post-hoc **Canary Case Studies** (`canary_case_studies.csv`): catches **5/5 top GFC closures** (`129–304 d` early) plus *Doral Bank* (`333 d`) & *Republic Bank* (`301 d`). At calibrated **$\theta^* = 0.0039$** ($C_{\text{FP}}=\$250\text{k}$/episode), flags **2.894%** of test rows (`43.0` median alerts/qtr) and captures **96.70%** of failing banks (`469 / 485`, `297.0 d` lead); **Top 1%/qtr** catches **82.27%** (`399 / 485`, precision **20.95%**, `210 d` lead). Operational `2026Q2` scoring (`watchlist_2026q2.csv`): scores `4,306` active banks (`26` flagged >= $\theta^*$). Spark MLlib DEV ROC-AUC = **0.9388**. |
@@ -157,8 +157,8 @@ This script runs Steps `00` through `09`, logs per-step wall-clock times to `out
 
 ## 5. Academic Integrity & Citations
 
-1. **Primary Data Source:**  
-   US Federal Deposit Insurance Corporation (FDIC) BankFind Suite Public API (`https://api.fdic.gov/banks`) and RISView Call Report Field Dictionary (`https://api.fdic.gov/banks/docs/`). Acquisition logic builds upon the optional course starter script `fdic_download_starter.py`.
+1. **Primary Data Source & Official Institutional References:**  
+   US Federal Deposit Insurance Corporation (FDIC) BankFind Suite Public API (`https://api.fdic.gov/banks`), RISView Call Report Field Dictionary (`https://api.fdic.gov/banks/docs/`), FDIC 2024 Annual Report, and FDIC Proposed 2025 Operating Budget. Acquisition logic builds upon the optional course starter script `fdic_download_starter.py`.
 2. **Academic Literature:**  
    * Wheelock, D. C., & Wilson, P. W. (2000). *Why do banks disappear? The determinants of U.S. bank failures and acquisitions.* Review of Economics and Statistics, 82(1), 127–138.  
    * Shumway, T. (2001). *Forecasting bankruptcy more accurately: A simple hazard model.* The Journal of Business, 74(1), 101–124.  

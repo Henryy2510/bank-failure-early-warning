@@ -284,7 +284,7 @@ def sync_benchmarks_into_docs() -> None:
     p1 = {r["format"]: r for r in pl.read_csv(tdir / "part1_storage_benchmark.csv").iter_rows(named=True)}
     p3 = {(r["scale"], r["engine"]): r for r in pl.read_csv(tdir / "part3_benchmark_results.csv").iter_rows(named=True)}
     cap = json.loads((tdir / "part3_capacity_extrapolation.json").read_text(encoding="utf-8"))
-    sp = {r["scale"]: r for r in pl.read_csv(tdir / "spark_scaling_results.csv").iter_rows(named=True)}
+    sp = {(r["scale"], r["engine"]): r for r in pl.read_csv(tdir / "spark_scaling_results.csv").iter_rows(named=True)}
     parity = json.loads((tdir / "spark_polars_parity.json").read_text(encoding="utf-8"))
     f32 = {r["column"]: r for r in pl.read_csv(tdir / "part1_float32_check.csv").iter_rows(named=True)}
     dq = json.loads((tdir / "dq_summary.json").read_text(encoding="utf-8"))
@@ -321,7 +321,9 @@ def sync_benchmarks_into_docs() -> None:
         p3[("4x", "Polars eager")],
         p3[("4x", "pandas + pushdown")],
     )
-    sp1, sp4 = sp["1x"], sp["4x"]
+    sp1_2, sp4_2 = sp[("1x", "PySpark local[2]")], sp[("4x", "PySpark local[2]")]
+    sp1_4, sp4_4 = sp[("1x", "PySpark local[4]")], sp[("4x", "PySpark local[4]")]
+    parity_sum_sci = _format_latex_sci(float(parity["yearly_fingerprint"]["max_relative_diff_of_sums"]))
 
     q1_block = (
         f"* **Q1 (Storage, Laptop Processing & When a Spark Cluster is Needed):**  \n"
@@ -329,12 +331,12 @@ def sync_benchmarks_into_docs() -> None:
         f"down to **{hive_r['size_mb']:.1f} MB** (`{hive_r['compression_vs_csv']:.2f}x` compression; write time **{hive_r['write_s']:.3f} s**) when stored as "
         f"**Hive-partitioned Apache Parquet** (`YEAR=YYYY`) with **Zstandard (level 3)** compression, explicit canonical typing (`Int32` keys, `Date32`, `Float64` measures), "
         f"and sorted `(REPDTE, CERT)` row groups. On our measured **1x–8x multi-scale stress test** (`1.68M` up to **`13.46M` rows**, `{env['cpu_logical']}` logical CPUs, "
-        f"`{env['ram_total_gb']:.2f} GB` RAM), **Polars Streaming** completes **`13.46M` rows in `{ps8['time_s']:.3f} s`** (`{int(ps8['peak_rss_mb']):,} MB` peak RSS) and "
+        f"`{env['ram_total_gb']:.2f} GB` RAM, `POLARS_MAX_THREADS=4`), **Polars Streaming** completes **`13.46M` rows in `{ps8['time_s']:.3f} s`** (`{int(ps8['peak_rss_mb']):,} MB` peak RSS) and "
         f"**Polars Lazy** in `{pl8['time_s']:.3f} s` (`{int(pl8['peak_rss_mb']):,} MB`), scaling at only **`{ps_s['mb_per_million_rows']:.1f} MB / million rows`** "
         f"(`~{ps_s['rows_millions_until_16gb']:.1f}M` rows capacity in `16 GB` RAM) compared with **`{pd_s['mb_per_million_rows']:.1f} MB / million rows`** for **Pandas + pushdown** "
-        f"(`{pd_s['rows_millions_until_16gb']:.1f}M` rows limit) and **`{int(pn1['peak_rss_mb']):,} MB`** at `1x` alone for **Pandas Naive**. Local **PySpark 4.3 (`local[2]`)** reproduces "
-        f"identical numeric results ($2.24 \\times 10^{{-15}}$ yearly-sum parity, $0.000$ sample max diff) in **`{sp1['total_s']:.3f} s` at `1x`** (`{sp1['peak_rss_tree_mb']:,.1f} MB` "
-        f"Python+JVM tree RSS) and **`{sp4['total_s']:.3f} s` at `4x` (`6.73M` rows, `{sp4['peak_rss_tree_mb']:,.1f} MB` tree RSS)**. A distributed Spark cluster is therefore **unnecessary** "
+        f"(`{pd_s['rows_millions_until_16gb']:.1f}M` rows limit) and **`{int(pn1['peak_rss_mb']):,} MB`** at `1x` alone for **Pandas Naive**. At equal **4-thread** concurrency, local **PySpark 4.3 (`local[4]`)** reproduces "
+        f"identical numeric results (${parity_sum_sci}$ yearly-sum parity, $0.000$ sample max diff) in **`{sp1_4['total_s']:.3f} s` at `1x`** (`{sp1_4['peak_rss_tree_mb']:,.1f} MB` "
+        f"Python+JVM tree RSS) and **`{sp4_4['total_s']:.3f} s` at `4x` (`6.73M` rows, `{sp4_4['peak_rss_tree_mb']:,.1f} MB` tree RSS; `local[2]`: `{sp4_2['total_s']:.3f} s`)**. A distributed Spark cluster is therefore **unnecessary** "
         f"for quarterly bank-level Call Reports (`<30M` rows fit comfortably in Polars on a laptop), and becomes justified only when expanding to ~2,400 regulatory schedules, "
         f"borrower-level credit registries ($>10^8$ rows), or high-frequency interbank settlement streams exceeding ~32–64 GB single-node memory."
     )
@@ -351,17 +353,19 @@ def sync_benchmarks_into_docs() -> None:
 
     ram_pct_more = round((pd4["peak_rss_mb"] / ps4["peak_rss_mb"] - 1.0) * 100.0)
     slope_ratio = pd_s["mb_per_million_rows"] / ps_s["mb_per_million_rows"]
-    spark_slowdown = sp4["total_s"] / ps4["time_s"]
+    spark_slowdown_4t = sp4_4["total_s"] / ps4["time_s"]
+    spark_compute_slowdown_4t = sp4_4["compute_s"] / ps4["time_s"]
     p3_section = (
         f"### 4.2 Multi-Scale Benchmark (`1x–8x`, Up to `13.46M` Rows) vs. Pandas & PySpark\n"
         f"Tested on a Linux workstation (**`{env['cpu_physical']}` physical / `{env['cpu_logical']}` logical CPUs**, **`{env['ram_total_gb']:.2f} GB` RAM**, "
-        f"Polars `{env['polars']}`, pandas `{env['pandas']}`; `outputs/tables/benchmark_environment.json`), we avoid unreliable extrapolation from `<1.7M` sub-slices by generating "
-        f"disjoint replicated panels up to **`8x` (`13,460,928` rows)** in isolated `spawn` subprocesses (`outputs/tables/part3_benchmark_results.csv`, `spark_scaling_results.csv`):\n\n"
-        f"| Scale (`Rows`) | Polars (Streaming) Time / RSS | Polars (Lazy) Time / RSS | Polars (Eager) Time / RSS | Pandas + Pushdown Time / RSS | PySpark `local[2]` Time / Tree RSS |\n"
+        f"Polars `{env['polars']}` capped at `POLARS_MAX_THREADS=4`, pandas `{env['pandas']}`; `outputs/tables/benchmark_environment.json`), we avoid unreliable extrapolation from `<1.7M` sub-slices by generating "
+        f"disjoint replicated panels up to **`8x` (`13,460,928` rows)** in isolated `spawn` subprocesses (`outputs/tables/part3_benchmark_results.csv`, `spark_scaling_results.csv`). "
+        f"For a fair equal-core comparison against 4-thread Polars, PySpark is benchmarked at **`local[4]`** alongside the **`local[2]`** laptop-memory baseline:\n\n"
+        f"| Scale (`Rows`) | Polars (Streaming, 4t) Time / RSS | Polars (Lazy, 4t) Time / RSS | Polars (Eager, 4t) Time / RSS | Pandas + Pushdown Time / RSS | PySpark `local[4]` (4t) Time / Tree RSS *(vs `local[2]`)* |\n"
         f"| :--- | :---: | :---: | :---: | :---: | :---: |\n"
-        f"| **`1x` (`1.68M`)** | **`{ps1['time_s']:.3f} s`** / `{int(ps1['peak_rss_mb']):,} MB` | `{pl1['time_s']:.3f} s` / `{int(pl1['peak_rss_mb']):,} MB` | `{pe1['time_s']:.3f} s` / **`{int(pe1['peak_rss_mb']):,} MB`** | **`{pd1['time_s']:.3f} s`** / `{int(pd1['peak_rss_mb']):,} MB` *(naive `{pn1['time_s']:.3f} s` / `{int(pn1['peak_rss_mb']):,} MB`)* | `{sp1['total_s']:.3f} s` (`{sp1['spark_startup_s']:.3f} s` JVM) / `{sp1['peak_rss_tree_mb']:,.1f} MB` |\n"
+        f"| **`1x` (`1.68M`)** | **`{ps1['time_s']:.3f} s`** / `{int(ps1['peak_rss_mb']):,} MB` | `{pl1['time_s']:.3f} s` / `{int(pl1['peak_rss_mb']):,} MB` | `{pe1['time_s']:.3f} s` / **`{int(pe1['peak_rss_mb']):,} MB`** | **`{pd1['time_s']:.3f} s`** / `{int(pd1['peak_rss_mb']):,} MB` *(naive `{pn1['time_s']:.3f} s` / `{int(pn1['peak_rss_mb']):,} MB`)* | `{sp1_4['total_s']:.3f} s` (`{sp1_4['spark_startup_s']:.3f} s` JVM) / `{sp1_4['peak_rss_tree_mb']:,.1f} MB` *(`local[2]`: `{sp1_2['total_s']:.3f} s` / `{sp1_2['peak_rss_tree_mb']:,.1f} MB`)* |\n"
         f"| **`2x` (`3.37M`)** | **`{ps2['time_s']:.3f} s`** / `{int(ps2['peak_rss_mb']):,} MB` | `{pl2['time_s']:.3f} s` / `{int(pl2['peak_rss_mb']):,} MB` | `{pe2['time_s']:.3f} s` / `{int(pe2['peak_rss_mb']):,} MB` | **`{pd2['time_s']:.3f} s`** / `{int(pd2['peak_rss_mb']):,} MB` | — |\n"
-        f"| **`4x` (`6.73M`)** | **`{ps4['time_s']:.3f} s`** / **`{int(ps4['peak_rss_mb']):,} MB`** | `{pl4['time_s']:.3f} s` / `{int(pl4['peak_rss_mb']):,} MB` | `{pe4['time_s']:.3f} s` / `{int(pe4['peak_rss_mb']):,} MB` | **`{pd4['time_s']:.3f} s`** / **`{int(pd4['peak_rss_mb']):,} MB`** | `{sp4['total_s']:.3f} s` (`{sp4['compute_s']:.3f} s` compute) / `{sp4['peak_rss_tree_mb']:,.1f} MB` |\n"
+        f"| **`4x` (`6.73M`)** | **`{ps4['time_s']:.3f} s`** / **`{int(ps4['peak_rss_mb']):,} MB`** | `{pl4['time_s']:.3f} s` / `{int(pl4['peak_rss_mb']):,} MB` | `{pe4['time_s']:.3f} s` / `{int(pe4['peak_rss_mb']):,} MB` | **`{pd4['time_s']:.3f} s`** / **`{int(pd4['peak_rss_mb']):,} MB`** | `{sp4_4['total_s']:.3f} s` (`{sp4_4['compute_s']:.3f} s` compute) / `{sp4_4['peak_rss_tree_mb']:,.1f} MB` *(`local[2]`: `{sp4_2['total_s']:.3f} s` / `{sp4_2['peak_rss_tree_mb']:,.1f} MB`)* |\n"
         f"| **`8x` (`13.46M`)** | **`{ps8['time_s']:.3f} s`** / `{int(ps8['peak_rss_mb']):,} MB` | `{pl8['time_s']:.3f} s` / **`{int(pl8['peak_rss_mb']):,} MB`** | *(skipped OOM risk)* | *(skipped vs eager overhead)* | — |\n\n"
         f"*Numeric parity across all Polars, pandas, and PySpark runs:* max relative checksum difference $\\le {_format_latex_sci(max_diff)}$. Measuring across `1x–8x` (`13.46M` rows) reveals why scaling matters "
         f"(`outputs/tables/part3_capacity_extrapolation.json`): **Polars Streaming** grows memory at just **`{ps_s['mb_per_million_rows']:.1f} MB / million rows`** "
@@ -371,11 +375,12 @@ def sync_benchmarks_into_docs() -> None:
         f"(`{int(pd4['peak_rss_mb']):,} MB` vs `{int(ps4['peak_rss_mb']):,} MB`).\n\n"
         f"![Multi-Scale Processing Time and Peak RSS Scaling (1x–8x)](../outputs/figures/part3_scaling_benchmark.png)\n\n"
         f"### 4.3 PySpark Reproduction, Parity Verification & Cluster Justification\n"
-        f"In `scripts/06_spark.py` (`local[2]`, `1.2 GB` driver), Catalyst produces identical numeric outputs across all `43` years (`33,042` sampled rows: `0.0` abs diff; "
-        f"yearly sum diff $2.24 \\times 10^{{-15}}$). Reading `spark_execution_plan.txt` shows two `Exchange` shuffle barriers (`(CERT, YEAR)` followed by coarse `(CERT)` partitioning). "
-        f"Because `PySpark` incurs **{parity['timing_seconds']['spark_session_startup']:.2f} s JVM startup** and reaches `{sp4['total_s']:.3f} s` (`{sp4['peak_rss_tree_mb']:,.1f} MB` "
-        f"Python+JVM tree RSS) at `6.73M` rows vs `{ps4['time_s']:.3f} s` in Polars Streaming (**{spark_slowdown:.1f}x slower**), **a Spark cluster is unwarranted below ~30–50M rows**, "
-        f"becoming essential when wide schedules or loan-level credit registries overflow laptop RAM."
+        f"In `scripts/06_spark.py` (`1.2 GB` driver), Catalyst produces identical numeric outputs across all `43` years (`33,042` sampled rows: `0.0` abs diff; "
+        f"yearly sum diff ${parity_sum_sci}$). Reading `spark_execution_plan.txt` shows two `Exchange` shuffle barriers (`(CERT, YEAR)` followed by coarse `(CERT)` partitioning). "
+        f"Even on an **equal 4-thread footing**, `PySpark local[4]` incurs **`{sp4_4['spark_startup_s']:.3f} s` JVM startup** and reaches **`{sp4_4['total_s']:.3f} s`** total "
+        f"(`{sp4_4['compute_s']:.3f} s` compute, `{sp4_4['peak_rss_tree_mb']:,.1f} MB` Python+JVM tree RSS) at `6.73M` rows vs `{ps4['time_s']:.3f} s` in 4-thread Polars Streaming "
+        f"(**{spark_slowdown_4t:.1f}x slower** end-to-end; **{spark_compute_slowdown_4t:.1f}x slower** compute-only, while `local[2]` takes `{sp4_2['total_s']:.3f} s` / `{sp4_2['peak_rss_tree_mb']:,.1f} MB` — confirming JVM startup and shuffle barriers, not thread count, dominate local latency). "
+        f"Hence **a Spark cluster is unwarranted below ~30–50M rows**, becoming essential only when wide schedules or loan-level credit registries overflow laptop RAM."
     )
 
     md_path = ROOT / "report" / "report.md"
@@ -388,7 +393,7 @@ def sync_benchmarks_into_docs() -> None:
     readme_bench = "\n".join([
         f"| **Part 1: Storage** | Hive-partitioned Parquet (`YEAR`, Zstd L3, write **{hive_r['write_s']:.3f} s**) reduces footprint from **{csv_r['size_mb']:.1f} MB** (CSV) to **{hive_r['size_mb']:.1f} MB** (**{hive_r['compression_vs_csv']:.2f}x compression**); `YEAR=2023` filter executes in **{hive_r['filter_2023_s']:.3f} s**. Quantifies `{f32['ASSET']['rows_exceeding_float32_exact_int_limit']:,}` `ASSET` rows exceeding Float32 exact-int limit (up to **$128k** quantization error), justifying `Float64`. |",
         f"| **Part 2: Quality & Panel** | Resolves {len(dq['schema_drift_columns'])}-column schema drift, `P3ASSET` structural missingness, pre-1990 Basel zeroes (`{dq['validity']['pre1990_rbc1_zero_pct']}%`), **post-2020 CBLR `RBCRWAJ==0` (`{dq['validity']['era2020_rbcrwa_zero_pct']}%`, `{dq['validity']['era2020_rbcrwa_zero']:,}/{dq['validity']['era2020_rows']:,}` rows)**, negative stock anomalies (`ORE<0` `{dq['validity']['ore_negative']}`, `SC<0` `{dq['validity']['sc_negative']}`), YTD `Q1` $\\rightarrow$ `Q4` flow step-up (`{ytd['Q1']['median_intinc_to_asset']:.4f}` $\\rightarrow$ `{ytd['Q4']['median_intinc_to_asset']:.4f}`), and FDIC `CHANGEC1` exit mapping (`16,892` censored mergers vs. `2,859` failures vs. `4,313` active). Excludes {dq['failures']['share_last_report_not_scorable']}% non-scorable final quarters (`pit_scorable=False`). |",
-        f"| **Part 3: Processing** | Across **1x–8x (`1.68M–13.46M` rows)**: at `1x`, **Pandas + pushdown** (`{pd1['time_s']:.3f} s`, `{int(pd1['peak_rss_mb']):,} MB`) and **Polars Streaming** (`{ps1['time_s']:.3f} s`, `{int(ps1['peak_rss_mb']):,} MB`) lead; at **8x (`13.46M` rows)**, **Polars Streaming** completes in **`{ps8['time_s']:.3f} s`** (`{int(ps8['peak_rss_mb']):,} MB` RSS, scaling slope **`{ps_s['mb_per_million_rows']:.1f} MB / M rows`** $\\rightarrow$ `~{ps_s['rows_millions_until_16gb']:.1f}M` row limit in 16 GB RAM vs **`{pd_s['mb_per_million_rows']:.1f} MB / M rows`** $\\rightarrow$ `{pd_s['rows_millions_until_16gb']:.1f}M` for Pandas + pushdown). **PySpark `local[2]`** matches Polars with **$2.24 \\times 10^{{-15}}$ precision** (`{sp1['total_s']:.3f} s` / `{sp1['peak_rss_tree_mb']:,.1f} MB` tree RSS at `1x`; `{sp4['total_s']:.3f} s` / `{sp4['peak_rss_tree_mb']:,.1f} MB` at `4x`). |",
+        f"| **Part 3: Processing** | Across **1x–8x (`1.68M–13.46M` rows)** (`POLARS_MAX_THREADS=4`): at `1x`, **Pandas + pushdown** (`{pd1['time_s']:.3f} s`, `{int(pd1['peak_rss_mb']):,} MB`) and **Polars Streaming** (`{ps1['time_s']:.3f} s`, `{int(ps1['peak_rss_mb']):,} MB`) lead; at **8x (`13.46M` rows)**, **Polars Streaming** completes in **`{ps8['time_s']:.3f} s`** (`{int(ps8['peak_rss_mb']):,} MB` RSS, scaling slope **`{ps_s['mb_per_million_rows']:.1f} MB / M rows`** $\\rightarrow$ `~{ps_s['rows_millions_until_16gb']:.1f}M` row limit in 16 GB RAM vs **`{pd_s['mb_per_million_rows']:.1f} MB / M rows`** $\\rightarrow$ `{pd_s['rows_millions_until_16gb']:.1f}M` for Pandas + pushdown). At equal 4 threads, **PySpark `local[4]`** matches Polars with **${parity_sum_sci}$ precision** (`{sp1_4['total_s']:.3f} s` / `{sp1_4['peak_rss_tree_mb']:,.1f} MB` tree RSS at `1x`; `{sp4_4['total_s']:.3f} s` / `{sp4_4['peak_rss_tree_mb']:,.1f} MB` at `4x`; `local[2]`: `{sp4_2['total_s']:.3f} s`). |",
     ])
     readme_path = ROOT / "README.md"
     readme_txt = readme_path.read_text(encoding="utf-8")

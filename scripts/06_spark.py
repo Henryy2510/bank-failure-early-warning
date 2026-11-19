@@ -72,12 +72,12 @@ def compare_rows(spark_rows: list[dict], polars_sample: pl.DataFrame) -> dict:
             "max_abs_diff_any_column": worst}
 
 
-def _run_spark_worker(src_p: Path) -> None:
+def _run_spark_worker(src_p: Path, master: str = "local[2]") -> None:
     """Fresh-JVM worker computing total rows and checksum summary via Spark core transformations."""
     from pyspark.sql import functions as F
 
     t0 = time.perf_counter()
-    spark = get_spark_session("BFT65B-ScaleWorker")
+    spark = get_spark_session("BFT65B-ScaleWorker", master=master)
     t_startup = time.perf_counter() - t0
     t1 = time.perf_counter()
     df = spark_core(spark, src_p)
@@ -95,12 +95,16 @@ def _run_spark_worker(src_p: Path) -> None:
     }))
 
 
-def measure_spark_subprocess(src_p: Path, scale: int, repeat: int = 3) -> dict:
+def measure_spark_subprocess(src_p: Path, scale: int, master: str = "local[2]", repeat: int = 3) -> dict:
     """Measure fresh Python+JVM Spark execution while polling process-tree RSS (including child Java JVM)."""
+    import re
+
+    match = re.fullmatch(r"local\[(\d+)\]", master.strip())
+    threads = int(match.group(1)) if match else 2
     runs = []
     for _ in range(repeat):
         proc = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "--spark-worker", str(src_p)],
+            [sys.executable, str(Path(__file__).resolve()), "--spark-worker", str(src_p), "--master", master],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -118,7 +122,7 @@ def measure_spark_subprocess(src_p: Path, scale: int, repeat: int = 3) -> dict:
             time.sleep(0.05)
         out, err = proc.communicate()
         if proc.returncode != 0:
-            raise RuntimeError(f"Spark worker failed (scale={scale}x): {err}")
+            raise RuntimeError(f"Spark worker failed (scale={scale}x, master={master}): {err}")
         payload_line = [ln for ln in out.splitlines() if ln.startswith("SPARK_WORKER_JSON:")]
         if not payload_line:
             raise RuntimeError(f"Missing SPARK_WORKER_JSON output: {out}\n{err}")
@@ -131,7 +135,8 @@ def measure_spark_subprocess(src_p: Path, scale: int, repeat: int = 3) -> dict:
         "scale": f"{scale}x",
         "scale_factor": scale,
         "rows": med["rows"],
-        "engine": "PySpark local[2]",
+        "engine": f"PySpark {master}",
+        "threads": threads,
         "spark_startup_s": med["spark_startup_s"],
         "compute_s": med["compute_s"],
         "total_s": med["total_s"],
@@ -142,9 +147,10 @@ def measure_spark_subprocess(src_p: Path, scale: int, repeat: int = 3) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--spark-worker", type=Path, default=None, help=argparse.SUPPRESS)
+    ap.add_argument("--master", type=str, default="local[2]", help=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.spark_worker is not None:
-        _run_spark_worker(args.spark_worker)
+        _run_spark_worker(args.spark_worker, master=args.master)
         return
 
     bronze_p = bronze_financials_path()
@@ -171,22 +177,26 @@ def main() -> None:
     parity = {"yearly_fingerprint": compare_yearly(sp_yearly, pl_yearly),
               "row_level_sample": compare_rows(sp_rows, pl_sample),
               "timing_seconds": {"polars_lazy_collect_plus_aggregate": round(t_polars, 2),
+                                 "polars_threads": int(os.environ.get("POLARS_MAX_THREADS", "4")),
                                  "spark_session_startup": round(t_session, 2),
                                  "spark_job_cold": round(t_cold, 2), "spark_job_warm": round(t_warm, 2),
-                                 "note": "single in-process runs on the full panel; Spark = local[2], 1.2 GB driver"}}
+                                 "note": "single in-process runs on the full panel; Polars = 4 threads, Spark = local[2], 1.2 GB driver"}}
     log.info(f"Parity: {parity}")
     save_json(parity, out_dir("tables") / "spark_polars_parity.json")
 
-    log.info("Multi-scale PySpark benchmark (1x & 4x) with Python+JVM process-tree peak RSS...")
+    log.info("Multi-scale PySpark benchmark (1x & 4x, local[2] & local[4]) with Python+JVM process-tree peak RSS...")
     from scripts import __path__ as _scripts_pkg  # noqa: F401
     import importlib
     bench_mod = importlib.import_module("scripts.05_benchmark")
     tmp_spark = data_dir("bronze") / "_scale_spark_tmp"
     shutil.rmtree(tmp_spark, ignore_errors=True)
-    spark_rows = [measure_spark_subprocess(bronze_p, 1, repeat=2)]
+    spark_rows = []
+    for master in ("local[2]", "local[4]"):
+        spark_rows.append(measure_spark_subprocess(bronze_p, 1, master=master, repeat=2))
     try:
         p4 = bench_mod.build_scaled_parquet(bronze_p, tmp_spark / "s4", 4)
-        spark_rows.append(measure_spark_subprocess(p4, 4, repeat=2))
+        for master in ("local[2]", "local[4]"):
+            spark_rows.append(measure_spark_subprocess(p4, 4, master=master, repeat=2))
     finally:
         shutil.rmtree(tmp_spark, ignore_errors=True)
     spark_df = pl.DataFrame(spark_rows)
