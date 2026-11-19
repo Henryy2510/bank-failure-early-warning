@@ -66,6 +66,10 @@ def main() -> None:
         f"{dq_summary['validity']['era2020_rbcrwa_zero_pct']}%",
         f"{watchlist_summary['banks_scored']:,}",
         f"{watchlist_summary['flagged_at_theta']}",
+        "2026-11-05",
+        "frozen_protocol.json",
+        "88.56%",
+        "5,636",
     ]
 
     for row in cv_df.iter_rows(named=True):
@@ -124,6 +128,8 @@ def main() -> None:
         f"{full_bench['pandas + pushdown']['time_s']:.3f} s",
         f"{bench_8x['Polars streaming']['time_s']:.3f} s",
         f"{watchlist_summary['banks_scored']:,}",
+        "Elkan, C. (2001)",
+        "frozen_protocol.json",
         *feat_imp_df.head(3)["feature"].to_list(),
         *repo_handles,
     ]
@@ -170,6 +176,7 @@ def main() -> None:
         "917,074",
         "678,370",
         "87,172",
+        "data/fdic_download_starter.py",
     ]
     stale_found = [
         tok for tok in stale_tokens if (tok in report_txt or tok in readme_txt)

@@ -4,15 +4,15 @@
 
 ---
 
-### Submission Metadata (Cover Page Summary)
+### Submission
 
 | Field | Details |
 | :--- | :--- |
 | **Student Name** | Quản Hữu Nhật Minh |
 | **Student ID** | `11230998` |
 | **Public GitHub Repository** | https://github.com/Henryy2510/big-data-financial-analyst |
-| **Data Source & Method** | FDIC BankFind Suite Public REST API (`https://api.fdic.gov/banks`) via resumable Python downloader (`scripts/00_download.py`) |
-| **Download & Audit Date** | November 2026 (`manifest_financials.json` 100% verified against API metadata totals) |
+| **Data Source & Method** | FDIC BankFind Suite Public REST API (`https://api.fdic.gov/banks`) via resumable Python downloader (`scripts/00_download.py --download` / `fdic_download_starter.py`) |
+| **Download & Audit Date** | `2026-11-05` (`manifest_financials.json`, `failures.parquet`, and `institutions.parquet` 100% verified against API metadata totals) |
 | **Raw Table Row Counts** | **Financials:** `1,682,616` bank-quarters (`170` quarters, `1984Q1–2026Q2`, `24,064` distinct `CERT`s, `0` duplicate keys)<br>**Failures:** `4,117` total historical resolutions (`3,275` in `1984–2026`; `3,211` matched to active panel `CERT`s)<br>**Institutions:** `27,835` structural bank records |
 | **Development Period (`DEV`)** | **`1984Q1 – 2007Q4`** (`96` quarters): **`1,224,815`** bank-quarters (`1,223,542` pit-scorable), **`23,776`** distinct banks, **`2,661`** total pit-scorable failing banks (`1,522` failing banks inside the 5 walk-forward OOF validation blocks of `760,559` rows), **`8,844`** pit-scorable pre-failure quarters ($y_{i,q}=1$, base rate **$0.723\%$**; spans the 1984–1993 S&L and commercial banking crisis) |
 | **Purge / Embargo Gap (`PURGE`)** | **`2008Q1 – 2008Q4`** (`4` quarters): **`33,966`** bank-quarters (`33,922` pit-scorable) — enforces a strict 4-quarter embargo so no 4-quarter forward label from the development period overlaps the test set |
@@ -67,7 +67,7 @@ We design the **Bronze Layer (`data/bronze/financials`)** with explicit Arrow ty
 ## 3. Part 2: Data Quality Audit & Point-in-Time Panel [20 pts]
 
 ### 3.1 Automated Data Quality Audit Findings
-Running `scripts/02_quality.py` produces an automated audit report (`outputs/dq_report/data_quality_report.md` and `outputs/tables/dq_summary.json`). We identify seven systematic data quality anomalies in the raw FDIC tables:
+Running `scripts/02_quality.py` produces an automated audit report (`outputs/dq_report/data_quality_report.md` and `outputs/tables/dq_summary.json`). We identify eight systematic structural defects in the raw FDIC tables—six table-level defects below (grouped into items 1–5, covering negative stock balances and negative-equity inversion) plus competing-exit ambiguity and publication-lag truncation in Section 3.2:
 
 1. **Cross-Quarter Schema Drift (`14` columns affected):**  
    In quarters where no bank reported fractional values or where a schedule was omitted, the FDIC JSON-to-Parquet serializer inferred `int64` or `null` instead of `double` for 14 columns (`LNLSGR`, `DEPDOM`, `NAASSET`, `RBCRWAJ`, `CHBAL`, `LNRE`, `P9ASSET`, `LNLSNET`, `NCLNLS`, `LNCON`, `LNCI`, `SC`, `P3ASSET`, `DEP`). Attempting a naive `pl.scan_parquet("*.parquet")` raises `SchemaError: data type mismatch`. Our Bronze ingestion resolves this via strict per-file schema casting.
@@ -91,7 +91,7 @@ Running `scripts/02_quality.py` produces an automated audit report (`outputs/dq_
 
 3. **Dual Basel / CBLR Zero-as-Missing Regimes (`RBC1AAJ` and `RBCRWAJ`, `dq_zero_as_missing.csv`):**  
    * **Pre-1990 Basel I transition (`1984–1989`):** `RBCRWAJ == 0` in `100.0%` and `RBC1AAJ == 0` in **`18.13%`** of rows before risk-based capital reporting began. Post-1989 `RBC1AAJ == 0` appears in `3,458` rows (`3,369` of which have `EQ IS NULL`).
-   * **Post-2020 Community Bank Leverage Ratio (`CBLR`, `2020–2026`):** `RBCRWAJ == 0` jumps from `0.22%–0.31%` (1990–2019) to **`37.15%` (`45,865 / 123,461` rows)** in `2020–2026`, with **`45,423` (`36.79%`)** reporting healthy positive Tier 1 leverage (`RBC1AAJ > 0`). Qualifying community banks electing CBLR since 2020 are legally exempt from risk-weighted asset filing; treating `RBCRWAJ == 0` as literal `0%` capital mislabels over a third of healthy modern banks as capital-depleted. In `src/bfews/features.py`, we recode `RBC1AAJ == 0` (when pre-1990 or `EQ IS NULL`) and `RBCRWAJ == 0` (when pre-1990, `EQ IS NULL`, `RBC1AAJ >= 8%`, or post-2020 `RBC1AAJ > 0`) to `NULL`, while preserving true distress zeros (`EQ < 0`).
+   * **Post-2020 Community Bank Leverage Ratio (`CBLR`, `2020–2026`):** `RBCRWAJ == 0` jumps from `0.22%–0.31%` (1990–2019) to **`37.15%` (`45,865 / 123,461` rows)** in `2020–2026`, with **`45,423` (`36.79%`)** reporting healthy positive Tier 1 leverage (`RBC1AAJ > 0`). Qualifying community banks electing CBLR since 2020 are legally exempt from risk-weighted asset filing; per FDIC's RISView API specification (`risview_properties.yaml`, `x-source-mapping`), API-derived percentage ratios default to literal `0` rather than `NULL` when underlying denominators are null, non-positive, or exempt—mislabeling over a third of healthy modern banks as capital-depleted if left untreated. In `src/bfews/features.py`, we recode `RBC1AAJ == 0` (when pre-1990 or `EQ IS NULL`) and `RBCRWAJ == 0` (when pre-1990, `EQ IS NULL`, `RBC1AAJ >= 8%`, or post-2020 `RBC1AAJ > 0`) to `NULL`, while preserving true distress zeros (`EQ < 0`).
 4. **Cumulative YTD Income Flows (`dq_ytd_monotonicity.csv`):**  
    All 7 income/expense flow items are reported cumulatively YTD: raw median **`INTINC / ASSET`** doubles/triples/quadruples across **Q1 (`0.0177`) $\rightarrow$ Q2 (`0.0352`) $\rightarrow$ Q3 (`0.0526`) $\rightarrow$ Q4 (`0.0689`)** while annualized **`ROA`** stays flat (`0.971%`, `0.989%`, `0.993%`, `0.944%`). `src/bfews/panel.py` de-cumulates flows strictly across consecutive same-year quarters (`ytd_prev_ok()`).
 5. **Negative Stock Anomalies, Accounting Identities & Insolvency Inversion:**  
@@ -108,7 +108,7 @@ Every bank (`24,064` `CERT`s) is classified (`outputs/tables/bank_exit_summary.c
 | **`FAILED` (FDIC Resolution)** | `2,859` | `11.88%` | `87,673` | Whole failures/assisted/payoffs (`211`: `2,393`, `213`: `337`, `230`: `191`); $y=1$ in `(q, q+4Q]` |
 | **Total Panel** | **`24,064`** | **`100.00%`** | **`1,682,616`** | *Caveat:* `institutions.parquet` holds current snapshots, never used as historical features |
 
-**Point-in-Time Publication Lag Gate:** Call Reports release ~60 days post-quarter-end (`available_date = REPDTE + 60 days`). Among failed banks, **59.1%** failed within 60 days of their final filing (`median = 49` days); those quarters are flagged `pit_scorable = False` and excluded from training and evaluation.
+**Post-Failure Filings, Multi-Event `CERT`s & Point-in-Time Publication Lag Gate:** Across the `4,117` raw resolution records (`3,524` `FAILURE`, `593` `ASSISTANCE`), **`44` `CERT`s** appear more than once (`37` `ASSISTANCE+FAILURE`, `4` `ASSISTANCE+ASSISTANCE`, `3` `FAILURE+FAILURE`); `failures_by_cert()` retains each bank's **earliest** event, and `labels.py` drops **`5,636` post-event rows** (`0.335%` across `471` banks: `4,428` following `ASSISTANCE` and `1,208` on/after formal `FAILURE`) where `REPDTE >= FAILDATE`, leaving `1,676,980` pre-event Gold rows (`0` post-failure rows). Moreover, Call Reports release ~60 days post-quarter-end (`available_date = REPDTE + 60 days`): among failed banks, **59.1%** failed within 60 days of their final filing (`median = 49` days); those quarters are flagged `pit_scorable = False` and excluded from training and evaluation.
 
 ---
 
@@ -167,7 +167,7 @@ We implement a two-level temporal validation design (`config.yaml`, `src/bfews/m
 * **`DEV` (`1984Q1–2007Q4`):** `1,223,542` pit-scorable rows across **`2,661` total pit-scorable failing banks** (`8,844` pre-failure quarters). All model selection, feature engineering, and threshold calibration occur exclusively within `DEV`.
 * **Expanding-Window Walk-Forward CV Inside `DEV`:** We evaluate 5 chronological out-of-time validation blocks (`1988`, `1990`, `1992`, `1994–1999`, `2000–2007`), each preceded by a 1-year purge buffer (`4` quarters) between training and validation. Pooled across the 5 validation blocks, the out-of-fold (`OOF`) evaluation set comprises **`760,559` bank-quarters** (`3,547` positive pre-failure quarters) and **`1,522` failing banks** (the remaining `1,139` `DEV` failures occurred in the initial `1984–1987` warm-up window or inside the 1-year inter-fold purge years `1989`, `1991`, `1993`).
 * **`PURGE` (`2008Q1–2008Q4`):** `33,922` pit-scorable rows. Dropping all `2008` filings guarantees **zero 4-quarter forward label overlap** before testing begins in `2009Q1`.
-* **`TEST` (`2009Q1–2025Q2`):** `400,332` pit-scorable rows (`485` failing banks, `1,409` pre-failure quarters). No hyperparameters, feature lists, or threshold rules were tuned on `TEST`; during pipeline auditing, software bugs in probability calibration (`PriorOddsCalibrator`) and `TexasRatioBaseline` fitting were fixed and `07_model.py` was re-executed with `TEST` held strictly as a passive reporting partition.
+* **`TEST` (`2009Q1–2025Q2`):** `400,332` pit-scorable rows (`485` failing banks, `1,409` pre-failure quarters). No hyperparameters, feature lists, or threshold rules were tuned on `TEST`; the full DEV-only specification (splits, 26 features, `FORBIDDEN_FEATURE_COLS`, champion rule, cost parameters, and $\theta^* = 0.0039$) is cryptographically locked in `outputs/tables/frozen_protocol.json` (`protocol_sha256` & `test_results_sha256` verified by `pytest`), while software fixes in probability calibration (`PriorOddsCalibrator`) and `TexasRatioBaseline` were re-executed with `TEST` held strictly as a passive reporting partition.
 
 ### 6.2 Model Comparison (Walk-Forward CV, Label Sensitivity & Spark MLlib Demo)
 
@@ -188,7 +188,7 @@ In real central-bank supervision, early-warning scores are deployed under two co
 1. **Fixed Quarterly Supervisory Capacity Budgets (`Top 1%`, `Top 2%`, `Top 5%` per quarter):** Examination departments have a fixed roster of on-site examiners each quarter and inspect the top $k\%$ highest-risk institutions per quarter.
 2. **Expected-Cost Minimizing Probability Threshold ($\theta^*$):** Using prior-odds calibrated probabilities on the `760,559` `DEV` OOF rows (`1,522` failing banks), we minimize total supervisory loss over a 300-point log-spaced threshold grid $\theta \in [10^{-4}, 0.90]$:
    $$\mathcal{L}(\theta) = \sum_{b \in \text{FN}(\theta)} \ell_{\text{DIF}} \cdot \min(\text{ASSET}_b,\, A_{0.85}) \;+\; C_{\text{FP}} \cdot \text{FP}_{\text{episodes}}(\theta)$$
-   with empirical DIF loss rate $\ell_{\text{DIF}} = 0.1961$, community/regional asset cap $A_{0.85} = \$474,926\text{k}$, and episode-based false-alarm cost ($C_{\text{FP}} = \$250\text{k}$). The unique interior cost minimum on `DEV` OOF occurs at **$\theta^* = 0.0039$** (`theta_at_grid_edge = False`, `expected_cost_dev_kusd = 5,418,988` kUSD), capturing **`1,434 / 1,522` failing banks** (`88` missed, `8,083` episodes).
+   with empirical DIF loss rate $\ell_{\text{DIF}} = 0.1961$, community/regional asset cap $A_{0.85} = \$474,926\text{k}$, and episode-based false-alarm cost ($C_{\text{FP}} = \$250\text{k}$). The unique interior cost minimum on `DEV` OOF occurs at **$\theta^* = 0.0039$** (`theta_at_grid_edge = False`, `expected_cost_dev_kusd = 5,418,988` kUSD), capturing **`1,434 / 1,522` failing banks** (`88` missed, `8,083` episodes) and cutting expected supervisory loss by **`88.56%`** relative to a No-Alarm policy (`$47,352.9M`) and **`86.61%`** relative to a naive $\tau \approx 0.50$ cutoff (`$40,460.8M`, only `14.55%` saving under `0.47%` base-rate imbalance; `outputs/tables/frozen_protocol.json`).
 
 **Sensitivity of Optimal Threshold $\theta^*$ to False-Alarm Cost $C_{\text{FP}}$ (`outputs/tables/test_results.json`):**
 

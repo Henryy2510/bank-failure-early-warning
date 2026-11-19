@@ -345,6 +345,7 @@ def test_upgrade_artifacts_present():
         "watchlist_2026q2.csv",
         "watchlist_2026q2_summary.json",
         "model_curves_data.json",
+        "frozen_protocol.json",
     ]
     for name in required_tables:
         p = tdir / name
@@ -358,5 +359,59 @@ def test_upgrade_artifacts_present():
     for fig in ("pr_and_cost_curves.png", "alarms_and_canary_trajectories.png"):
         fp = fdir / fig
         assert fp.exists() and fp.stat().st_size > 0, f"Missing figure artifact: {fp}"
+
+
+def test_forbidden_outcome_columns_excluded_from_features():
+    """Verify no ex-post outcome, failure-registry, or split metadata column can enter FEATURE_COLS_CAMELS."""
+    from src.bfews.features import FEATURE_COLS_CAMELS, FORBIDDEN_FEATURE_COLS
+
+    overlap = set(FEATURE_COLS_CAMELS).intersection(FORBIDDEN_FEATURE_COLS)
+    assert not overlap, f"Forbidden columns leaked into FEATURE_COLS_CAMELS: {overlap}"
+    assert len(FEATURE_COLS_CAMELS) == 26
+
+
+def test_no_post_failure_rows_in_gold():
+    """Verify gold/features.parquet contains zero bank-quarter rows dated on or after FAILDATE."""
+    from src.bfews.utils import data_dir
+
+    gold_path = data_dir("gold") / "features.parquet"
+    if not gold_path.exists():
+        pytest.skip("Gold features parquet not present locally")
+    gold = pl.read_parquet(gold_path, columns=["REPDTE", "FAILDATE"])
+    post_fail = gold.filter(pl.col("FAILDATE").is_not_null() & (pl.col("REPDTE") >= pl.col("FAILDATE")))
+    assert post_fail.height == 0, f"Found {post_fail.height} post-failure rows in gold/features.parquet"
+
+
+def test_frozen_protocol_matches_test_results():
+    """Verify outputs/tables/frozen_protocol.json SHA-256 and spec match config.yaml and test_results.json."""
+    import hashlib
+    import json
+    from src.bfews.features import FEATURE_COLS_CAMELS
+    from src.bfews.utils import cfg, out_dir
+
+    tdir = out_dir("tables")
+    proto = json.loads((tdir / "frozen_protocol.json").read_text(encoding="utf-8"))
+    test_bytes = (tdir / "test_results.json").read_bytes()
+    test_res = json.loads(test_bytes.decode("utf-8"))
+
+    assert proto["test_results_sha256"] == hashlib.sha256(test_bytes).hexdigest()
+    spec = proto["frozen_spec"]
+    spec_bytes = json.dumps(spec, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    assert proto["protocol_sha256"] == hashlib.sha256(spec_bytes).hexdigest()
+    assert spec["split"] == cfg()["split"]
+    assert spec["feature_columns"] == list(FEATURE_COLS_CAMELS)
+    assert spec["frozen_theta"] == test_res["cost_threshold_tuning"]["theta"]
+    assert proto["held_out_test_summary"]["pr_auc"] == test_res["held_out_test_evaluation"]["pr_auc"]
+
+
+def test_readme_download_command_paths_exist():
+    """Verify script paths referenced in README.md exist on disk and broken starter path is absent."""
+    from src.bfews.utils import ROOT
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "data/fdic_download_starter.py" not in readme, "Stale broken path data/fdic_download_starter.py in README.md"
+    for rel in ("fdic_download_starter.py", "scripts/00_download.py", "run_all.sh", "requirements.txt", "config.yaml"):
+        assert (ROOT / rel).exists(), f"Referenced file missing: {rel}"
+
 
 

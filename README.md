@@ -84,13 +84,13 @@ final/
 ├── outputs/                           # Committed empirical outputs (tables, figures, DQ report)
 │   ├── dq_report/data_quality_report.md
 │   ├── figures/                       # 9 high-resolution PNG figures (200 DPI, incl. PR/Cost U-curves & Canary trajectories)
-│   └── tables/                        # Multi-scale & Spark benchmarks, Float32/CBLR/YTD/CHANGEC1 audits, leakage shift, watchlist_2026q2, test_results
+│   └── tables/                        # Multi-scale & Spark benchmarks, Float32/CBLR/YTD/CHANGEC1 audits, leakage shift, frozen_protocol, watchlist_2026q2, test_results
 ├── report/                            # Final Research Report deliverables
 │   ├── report.md                      # Full English report in GitHub Markdown
 │   ├── BFT65B_Final_Report.docx       # Formatted Word document with embedded tables and figures
 │   └── BFT65B_Final_Report.pdf        # Final PDF report (<= 20 pages)
 └── tests/
-    └── test_pipeline.py               # Automated pytest suite (15 tests: completeness, de-YTD, CBLR zero-fix, CV purge, preprocessor leakage invariance, parity, PDF pages)
+    └── test_pipeline.py               # Automated pytest suite (19 tests: completeness, de-YTD, CBLR zero-fix, forbidden cols, post-failure filter, CV purge, leakage invariance, frozen protocol, parity, README paths, PDF pages)
 ```
 
 > **Note on Data Files:** Per course submission rules, `data/` (`bronze/`, `silver/`, `gold/`) and `*.parquet` files are excluded via `.gitignore` and are not committed to Git.
@@ -116,7 +116,11 @@ final/
      ```bash
      .venv/bin/python scripts/00_download.py --verify-only
      ```
-   * To download fresh data from the public FDIC API (`https://api.fdic.gov/banks`, no API key required; resumable, ~45–60 minutes for all 170 quarters `1984Q1–2026Q2`), run `data/fdic_download_starter.py --out ./data_raw/fdic`.
+   * To download fresh data from the public FDIC API (`https://api.fdic.gov/banks`, no API key required; resumable, ~45–60 minutes for all 170 quarters `1984Q1–2026Q2`), run:
+     ```bash
+     .venv/bin/python scripts/00_download.py --download --out ./data_raw/fdic
+     ```
+     (which invokes the root `fdic_download_starter.py` script and runs offline completeness verification automatically).
 
 ### 3.3 Run All Stages & Tests with One Command
 ```bash
@@ -133,7 +137,7 @@ This script runs Steps `00` through `09`, logs per-step wall-clock times to `out
 * **Step 7 (`07_model.py`):** Runs 5-fold expanding walk-forward CV on `DEV` (`760,559` OOF rows, `1,522` OOF failing banks; `2,661` total `DEV` failing banks), audits leakage shifts & `FAILURE`-only label sensitivity, calibrates cost-optimal threshold ($\theta^* = 0.0039$), computes capacity budgets (`Top 1%, 2%, 5%`), evaluates once on `TEST`, scores `2026Q2` live operational watchlist (`watchlist_2026q2.csv`), and plots curves & trajectories.
 * **Step 8 (`08_build_notebooks_and_report.py`):** Executes `notebooks/*.ipynb` via `nbclient` and regenerates `report/BFT65B_Final_Report.docx` and `.pdf`.
 * **Step 9 (`09_check_report_numbers.py`):** Verifies that all key metrics in `report/report.md` and `README.md` match the generated JSON/CSV files.
-* **Tests (`pytest tests/`):** Runs 15 automated unit/integration tests verifying manifest completeness, YTD de-cumulation, CBLR zero recoding & negative stock sanitization, strict CV purges, preprocessor leakage invariance, Polars–PySpark parity, non-degenerate cost threshold, capacity points, explainability, Canary studies, upgraded artifacts, and the 20-page PDF limit.
+* **Tests (`pytest tests/`):** Runs 19 automated unit/integration tests verifying manifest completeness, YTD de-cumulation, CBLR zero recoding & negative stock sanitization, forbidden outcome column exclusion, zero post-failure Gold rows, strict CV purges, preprocessor leakage invariance, `frozen_protocol.json` SHA-256 lock, Polars–PySpark parity, non-degenerate cost threshold, capacity points, explainability, Canary studies, upgraded artifacts, README script paths, and the 20-page PDF limit.
 
 ---
 
@@ -158,7 +162,8 @@ This script runs Steps `00` through `09`, logs per-step wall-clock times to `out
 2. **Academic Literature:**  
    * Wheelock, D. C., & Wilson, P. W. (2000). *Why do banks disappear? The determinants of U.S. bank failures and acquisitions.* Review of Economics and Statistics, 82(1), 127–138.  
    * Shumway, T. (2001). *Forecasting bankruptcy more accurately: A simple hazard model.* The Journal of Business, 74(1), 101–124.  
-   * Cole, R. A., & White, L. J. (2012). *Déjà vu all over again: The causes of U.S. commercial bank failures this time around.* Journal of Financial Services Research, 42(1), 5–29.
+   * Cole, R. A., & White, L. J. (2012). *Déjà vu all over again: The causes of U.S. commercial bank failures this time around.* Journal of Financial Services Research, 42(1), 5–29.  
+   * Elkan, C. (2001). *The foundations of cost-sensitive learning.* Proceedings of the 17th International Joint Conference on Artificial Intelligence (IJCAI), 973–978.
 3. **External Code & Reference Repositories (Cited & Critically Improved):**  
    * `batuhanisik751/bank-failure-early-warning` ([GitHub](https://github.com/batuhanisik751/bank-failure-early-warning)): Consulted for CAMELS/Texas Ratio baseline and walk-forward cost intuition; upgraded to Bronze/Silver/Gold Polars + PySpark, Elkan prior-odds calibration, episode cost, and capacity budgets.  
    * `Tajaddin/bank-early-warning` ([GitHub](https://github.com/Tajaddin/bank-early-warning)): R/SQL supervisory econometrics inspiration; upgraded to 1.68M-row Polars/Spark processing with HGB permutation importance paired with standardized Logit directionality.  

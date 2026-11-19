@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from datetime import date
@@ -21,7 +22,7 @@ os.environ["POLARS_MAX_THREADS"] = "4"
 import polars as pl
 import requests
 
-from src.bfews.utils import raw_dir
+from src.bfews.utils import ROOT, raw_dir
 
 BASE = "https://api.fdic.gov/banks"
 PAGE_SIZE = 10_000
@@ -74,14 +75,30 @@ def verify_completeness(out: Path) -> bool:
     return dup_count == 0 and not bad_quarters and len(files) == len(manifest)
 
 
+def run_resumable_download(out: Path, start: str, end: str) -> None:
+    """Invoke the resumable FDIC BankFind API downloader (`fdic_download_starter.py`)."""
+    starter = ROOT / "fdic_download_starter.py"
+    if not starter.exists():
+        raise FileNotFoundError(f"Resumable downloader script not found at {starter}")
+    cmd = [sys.executable, str(starter), "--start", start, "--end", end, "--out", str(out)]
+    print(f"Launching resumable FDIC API download: {' '.join(cmd)}")
+    subprocess.run(cmd, check=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default=str(raw_dir()), help="Raw FDIC directory")
-    ap.add_argument("--verify-only", action="store_true", default=True,
-                    help="Verify local raw data without hitting network (default: True)")
+    ap.add_argument("--download", action="store_true", default=False,
+                    help="Run full resumable API download from FDIC BankFind before verifying")
+    ap.add_argument("--start", default="1984-03-31", help="Start quarter-end YYYY-MM-DD (used with --download)")
+    ap.add_argument("--end", default="2026-06-30", help="End quarter-end YYYY-MM-DD (used with --download)")
+    ap.add_argument("--verify-only", action="store_true", default=False,
+                    help="Verify local raw data without hitting network (default unless --download is set)")
     args = ap.parse_args()
 
     out = Path(args.out)
+    if args.download and not args.verify_only:
+        run_resumable_download(out, args.start, args.end)
     ok = verify_completeness(out)
     sys.exit(0 if ok else 1)
 
