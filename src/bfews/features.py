@@ -25,6 +25,13 @@ FEATURE_COLS_CAMELS = [
     "log_asset", "asset_growth_4q", "loan_growth_4q", "d4_texas_ratio", "d4_nclnls_ratio", "d4_eq_ratio",
 ]
 
+# Ex-post outcome, registry, and split metadata columns that must NEVER enter the feature matrix X.
+FORBIDDEN_FEATURE_COLS = [
+    "FAILDATE", "FAILTYPE", "COST", "RESTYPE", "ACTIVE", "ENDEFYMD", "CHANGEC1",
+    "exit_status", "has_failure_record", "target_fail_4q", "pit_scorable",
+    "label_complete", "split_group", "available_date",
+]
+
 
 def safe_div(num: pl.Expr, den: pl.Expr) -> pl.Expr:
     """num / den, or null when the denominator is not positive (imputed later, on training data only)."""
