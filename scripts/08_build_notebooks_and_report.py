@@ -326,19 +326,19 @@ def sync_benchmarks_into_docs() -> None:
     parity_sum_sci = _format_latex_sci(float(parity["yearly_fingerprint"]["max_relative_diff_of_sums"]))
 
     q1_block = (
-        f"With respect to the first research question—storage layout, laptop-scale processing, and the economic threshold for a distributed Spark cluster—"
-        f"four decades of quarterly bank reports (1.68 million rows across 33 fields) compress from {csv_r['size_mb']:.1f} MB in raw uncompressed CSV "
-        f"down to {hive_r['size_mb']:.1f} MB ({hive_r['compression_vs_csv']:.2f}x compression; write time {hive_r['write_s']:.3f} s) when stored as "
-        f"Hive-partitioned Apache Parquet (YEAR=YYYY) with Zstandard level-3 compression, explicit canonical typing (Int32 keys, Date32 dates, Float64 measures), "
-        f"and sorted (REPDTE, CERT) row groups. On a measured 1x–8x multi-scale stress test spanning 1.68 million up to 13.46 million rows ({env['cpu_logical']} logical CPUs, "
-        f"{env['ram_total_gb']:.2f} GB RAM, 4 Polars threads), Polars Streaming completes 13.46 million rows in {ps8['time_s']:.3f} s ({int(ps8['peak_rss_mb']):,} MB peak RSS) and "
-        f"Polars Lazy finishes in {pl8['time_s']:.3f} s ({int(pl8['peak_rss_mb']):,} MB), scaling at only {ps_s['mb_per_million_rows']:.1f} MB per million rows "
-        f"(an extrapolated ceiling of {ps_s['rows_millions_until_16gb']:.1f} million rows in 16 GB RAM) compared with {pd_s['mb_per_million_rows']:.1f} MB per million rows for Pandas with pushdown "
-        f"({pd_s['rows_millions_until_16gb']:.1f} million row ceiling) and {int(pn1['peak_rss_mb']):,} MB at 1x alone for naive Pandas. At equal 4-thread concurrency, local PySpark 4.3 (`local[4]`) reproduces "
-        f"identical numeric results (${parity_sum_sci}$ yearly-sum parity, $0.000$ sample maximum difference) in {sp1_4['total_s']:.3f} s at 1x ({sp1_4['peak_rss_tree_mb']:,.1f} MB "
-        f"Python+JVM tree RSS) and {sp4_4['total_s']:.3f} s at 4x (6.73 million rows, {sp4_4['peak_rss_tree_mb']:,.1f} MB tree RSS; `local[2]`: {sp4_2['total_s']:.3f} s). A distributed Spark cluster is therefore unnecessary "
-        f"for quarterly bank-level Call Reports—panels below 30–50 million rows fit comfortably in Polars on a standard laptop—and becomes justified only when expanding to roughly 2,400 regulatory schedules, "
-        f"borrower-level credit registries exceeding $10^8$ rows, or high-frequency interbank settlement streams exceeding 32–64 GB single-node memory."
+        f"On Q1 (storage, laptop processing, and Spark cluster justification), four decades of quarterly bank reports "
+        f"(1.68 million rows across 33 fields) are best stored as Hive-partitioned Apache Parquet (`YEAR=YYYY`) with Zstandard level-3 compression, "
+        f"canonical Arrow typing (Int32 keys, Date32 dates, Float64 measures), and sorted (REPDTE, CERT) row groups, compressing raw CSV storage by "
+        f"{hive_r['compression_vs_csv']:.2f}x ({csv_r['size_mb']:.1f} MB to {hive_r['size_mb']:.1f} MB; write time {hive_r['write_s']:.3f} s). "
+        f"On a 1x–8x stress test up to 13.46 million rows ({env['cpu_logical']} logical CPUs, {env['ram_total_gb']:.2f} GB RAM, 4 Polars threads), "
+        f"Polars Streaming finishes in {ps8['time_s']:.3f} s ({int(ps8['peak_rss_mb']):,} MB peak RSS; Polars Lazy: {pl8['time_s']:.3f} s / {int(pl8['peak_rss_mb']):,} MB), "
+        f"scaling at {ps_s['mb_per_million_rows']:.1f} MB per million rows (extrapolated {ps_s['rows_millions_until_16gb']:.1f}-million-row ceiling in 16 GB RAM) "
+        f"versus {pd_s['mb_per_million_rows']:.1f} MB per million rows for Pandas with pushdown ({pd_s['rows_millions_until_16gb']:.1f}-million-row ceiling; "
+        f"{int(pn1['peak_rss_mb']):,} MB at 1x for naive Pandas). At equal 4-thread concurrency, PySpark 4.3 (`local[4]`) reproduces identical numeric outputs "
+        f"(${parity_sum_sci}$ yearly-sum parity, $0.000$ sample max diff) in {sp1_4['total_s']:.3f} s at 1x ({sp1_4['peak_rss_tree_mb']:,.1f} MB tree RSS) and "
+        f"{sp4_4['total_s']:.3f} s at 4x (6.73 million rows, {sp4_4['peak_rss_tree_mb']:,.1f} MB tree RSS; `local[2]`: {sp4_2['total_s']:.3f} s). "
+        f"A distributed Spark cluster is therefore unnecessary for bank-level Call Reports below 30–50 million rows and becomes justified only when expanding to "
+        f"thousands of regulatory schedules, borrower-level credit registries exceeding $10^8$ rows, or high-frequency interbank payment streams surpassing 32–64 GB single-node memory."
     )
 
     p1_table = "\n".join([
@@ -374,19 +374,23 @@ def sync_benchmarks_into_docs() -> None:
         f"| 8x (13.46M) | **{ps8['time_s']:.3f} s / {int(ps8['peak_rss_mb']):,} MB** | {pl8['time_s']:.3f} s / {int(pl8['peak_rss_mb']):,} MB | *(skipped OOM risk)* | *(skipped eager overhead)* | — |\n\n"
         f"*Note(s):* Cells report wall-clock runtime / peak RSS (Python+JVM process-tree RSS for PySpark). Maximum relative checksum difference across all Polars, Pandas, and PySpark runs is $\\le {_format_latex_sci(max_diff)}$. "
         f"Sources: `outputs/tables/part3_benchmark_results.csv`, `spark_scaling_results.csv`, and `benchmark_environment.json`.\n\n"
-        f"Measuring across 1x–8x exposes the structural memory advantage of streaming columnar execution (`outputs/tables/part3_capacity_extrapolation.json`). "
-        f"Polars Streaming grows peak memory at only {ps_s['mb_per_million_rows']:.1f} MB per million rows ({ps_s['seconds_per_million_rows']:.3f} s per million rows, implying a {ps_s['rows_millions_until_16gb']:.1f}-million-row capacity ceiling inside 16 GB RAM), "
-        f"whereas Pandas with column pushdown grows at {pd_s['mb_per_million_rows']:.1f} MB per million rows—a {slope_ratio:.2f}x steeper memory slope that exhausts 16 GB RAM by {pd_s['rows_millions_until_16gb']:.1f} million rows. "
-        f"At 4x scale (6.73 million rows), Pandas with pushdown executes quickly on pre-sorted 8-column slices ({pd4['time_s']:.3f} s) but already consumes {ram_pct_more}% more memory than Polars Streaming "
-        f"({int(pd4['peak_rss_mb']):,} MB vs. {int(ps4['peak_rss_mb']):,} MB), as depicted in Figure 3.\n\n"
+        f"A notable crossover appears in Table 5 and Figure 3: at 1x–4x on pre-sorted 8-column slices, Pandas with manual column pushdown edges Polars Streaming on raw wall time "
+        f"({pd1['time_s']:.3f} s vs. {ps1['time_s']:.3f} s at 1x; {pd4['time_s']:.3f} s vs. {ps4['time_s']:.3f} s at 4x) because PyArrow loads compact pre-sorted slices directly into contiguous NumPy arrays "
+        f"without morsel-scheduling overhead. Yet scaling to 4x–8x exposes why memory architecture governs laptop capacity (`outputs/tables/part3_capacity_extrapolation.json`). "
+        f"Because Pandas materializes full $O(N)$ intermediate column copies during `groupby` and `shift` transformations, its peak RSS grows at {pd_s['mb_per_million_rows']:.1f} MB per million rows—"
+        f"already consuming {ram_pct_more}% more memory than Polars Streaming at 4x ({int(pd4['peak_rss_mb']):,} MB vs. {int(ps4['peak_rss_mb']):,} MB) and exhausting 16 GB RAM by roughly {pd_s['rows_millions_until_16gb']:.1f} million rows. "
+        f"By contrast, Polars Streaming executes pipelined Rust operators over bounded morsels, flattening peak-memory growth to {ps_s['mb_per_million_rows']:.1f} MB per million rows "
+        f"(a {slope_ratio:.2f}x shallower slope; {ps_s['seconds_per_million_rows']:.3f} s per million rows), raising the extrapolated single-laptop ceiling to {ps_s['rows_millions_until_16gb']:.1f} million rows inside 16 GB RAM.\n\n"
         f"![Multi-scale execution time and peak RSS memory scaling across Polars, Pandas, and PySpark (1x–8x).](../outputs/figures/part3_scaling_benchmark.png)\n\n"
         f"### 4.3 PySpark Reproduction, Parity Verification, and Cluster Justification\n\n"
         f"In `scripts/06_spark.py` (1.2 GB driver memory), PySpark Catalyst reproduces Polars outputs identically across all 43 annual partitions, achieving a 0.0 maximum absolute difference across 33,042 sampled rows "
-        f"and a ${parity_sum_sci}$ maximum relative difference in yearly aggregate checksums (`outputs/tables/spark_polars_parity.json`). Inspecting the Catalyst physical plan (`outputs/tables/spark_execution_plan.txt`) reveals two full `Exchange` shuffle barriers—"
-        f"first partitioning by (CERT, YEAR) for YTD de-cumulation, then repartitioning by (CERT) for 4-quarter lags. Even on an equal 4-thread footing, PySpark `local[4]` incurs {sp4_4['spark_startup_s']:.3f} s of JVM startup overhead "
+        f"and a ${parity_sum_sci}$ maximum relative difference in yearly aggregate checksums (`outputs/tables/spark_polars_parity.json`). Inspecting the Catalyst physical plan (`outputs/tables/spark_execution_plan.txt`) explains why Spark lags on single-node workloads: "
+        f"Catalyst inserts two full `Exchange` shuffle barriers—first hash-partitioning by (CERT, YEAR) for YTD de-cumulation, then repartitioning by (CERT) for 4-quarter lags—serializing intermediate state across JVM boundaries. "
+        f"Even on an equal 4-thread footing, PySpark `local[4]` incurs {sp4_4['spark_startup_s']:.3f} s of JVM startup overhead "
         f"and requires {sp4_4['total_s']:.3f} s total ({sp4_4['compute_s']:.3f} s compute, {sp4_4['peak_rss_tree_mb']:,.1f} MB Python+JVM tree RSS) at 6.73 million rows compared with {ps4['time_s']:.3f} s in 4-thread Polars Streaming—"
         f"{spark_slowdown_4t:.1f}x slower end-to-end and {spark_compute_slowdown_4t:.1f}x slower compute-only, while `local[2]` requires {sp4_2['total_s']:.3f} s and {sp4_2['peak_rss_tree_mb']:,.1f} MB tree RSS. "
-        f"These measurements confirm that JVM initialization and shuffle barriers, rather than thread count, dominate local Spark latency. Consequently, a distributed Spark cluster is unwarranted for quarterly bank-level Call Reports below 30–50 million rows and becomes justified only when wide multi-schedule expansions or borrower-level credit registries overflow single-node RAM."
+        f"Doubling Spark's local thread count trims total latency by only {(1.0 - sp4_4['total_s'] / sp4_2['total_s']) * 100.0:.1f}%, confirming that JVM startup and shuffle barriers rather than core count dominate local latency. "
+        f"Consequently, a distributed Spark cluster is unwarranted for quarterly bank-level Call Reports below 30–50 million rows and becomes justified only when wide multi-schedule expansions or borrower-level credit registries exceed single-node memory or require fault-tolerant disk-spilling execution."
     )
 
     md_path = ROOT / "report" / "report.md"
@@ -490,8 +494,12 @@ local function compute_col_widths(tbl)
   return ncols
 end
 
-local function render_floating_table(cap_para, tbl, note_para)
+local function render_floating_table(cap_para, tbl, note_para, inline_mode)
   local ncols = compute_col_widths(tbl)
+  if inline_mode and ncols == 2 then
+    tbl.colspecs[1][2] = 0.21
+    tbl.colspecs[2][2] = 0.75
+  end
   local tbl_tex = pandoc.write(pandoc.Pandoc({tbl}), "latex")
   tbl_tex = tbl_tex:gsub("^%s*{%s*\\def\\LTcaptype{none}[^\n]*\n", "")
   tbl_tex = tbl_tex:gsub("\n}%s*$", "")
@@ -502,27 +510,34 @@ local function render_floating_table(cap_para, tbl, note_para)
   tbl_tex = tbl_tex:gsub("\\endlastfoot", "")
   tbl_tex = tbl_tex:gsub("\\end{longtable}", "\\bottomrule\n\\end{tabular}")
 
-  local sz = (ncols >= 6) and "\\footnotesize" or "\\small"
+  local sz = (inline_mode or ncols >= 6) and "\\footnotesize" or "\\small"
   local sep = (ncols >= 8) and "2.5pt" or "3.5pt"
   local cap_tex = cap_para and pandoc.write(pandoc.Pandoc({cap_para}), "latex") or ""
   local note_tex = note_para and pandoc.write(pandoc.Pandoc({note_para}), "latex") or ""
 
-  local parts = {
-    "\\begin{table}[htbp]",
-    "\\centering",
-    "\\begin{minipage}{\\linewidth}",
-  }
-  if cap_tex ~= "" then
-    table.insert(parts, "{\\small\\noindent " .. cap_tex:gsub("%s+$", "") .. "\\par\\vspace{3pt}}")
+  local parts = {}
+  if inline_mode then
+    table.insert(parts, "\\vspace{4pt}\\noindent\\begin{minipage}{\\linewidth}")
+  else
+    table.insert(parts, "\\begin{table}[htbp]")
+    table.insert(parts, "\\centering")
+    table.insert(parts, "\\begin{minipage}{\\linewidth}")
   end
-  table.insert(parts, "{\\centering" .. sz .. "\\renewcommand{\\arraystretch}{1.04}\\setlength{\\tabcolsep}{" .. sep .. "}")
+  if cap_tex ~= "" then
+    table.insert(parts, "{\\small\\noindent " .. cap_tex:gsub("%s+$", "") .. "\\par\\vspace{2.5pt}}")
+  end
+  table.insert(parts, "{\\centering" .. sz .. "\\renewcommand{\\arraystretch}{1.03}\\setlength{\\tabcolsep}{" .. sep .. "}")
   table.insert(parts, tbl_tex)
   table.insert(parts, "\\par}")
   if note_tex ~= "" then
-    table.insert(parts, "{\\vspace{3pt}\\footnotesize\\noindent " .. note_tex:gsub("%s+$", "") .. "\\par}")
+    table.insert(parts, "{\\vspace{2.5pt}\\footnotesize\\noindent " .. note_tex:gsub("%s+$", "") .. "\\par}")
   end
-  table.insert(parts, "\\end{minipage}")
-  table.insert(parts, "\\end{table}")
+  if inline_mode then
+    table.insert(parts, "\\end{minipage}\\vspace{2pt}")
+  else
+    table.insert(parts, "\\end{minipage}")
+    table.insert(parts, "\\end{table}")
+  end
   return pandoc.RawBlock("latex", table.concat(parts, "\n"))
 end
 
@@ -541,6 +556,8 @@ function Blocks(blocks)
   while i <= #blocks do
     local blk = blocks[i]
     if blk.t == "Para" and pandoc.utils.stringify(blk):match("^Table [A-Z]?%d+%.") and i < #blocks and blocks[i + 1].t == "Table" then
+      local cap_str = pandoc.utils.stringify(blk)
+      local inline_mode = cap_str:match("^Table 1%.") ~= nil
       local note_para = nil
       local step = 2
       if i + 2 <= #blocks and blocks[i + 2].t == "Para" then
@@ -550,10 +567,10 @@ function Blocks(blocks)
           step = 3
         end
       end
-      table.insert(out, render_floating_table(blk, blocks[i + 1], note_para))
+      table.insert(out, render_floating_table(blk, blocks[i + 1], note_para, inline_mode))
       i = i + step
     elseif blk.t == "Table" then
-      table.insert(out, render_floating_table(nil, blk, nil))
+      table.insert(out, render_floating_table(nil, blk, nil, false))
       i = i + 1
     else
       table.insert(out, blk)
@@ -567,7 +584,7 @@ function Header(el)
   if FORMAT:match "latex" then
     if el.level == 1 then
       return {
-        pandoc.RawBlock("latex", "\\thispagestyle{firstpage}\\vspace*{0.35in}\\begin{center}{\\fontsize{16}{21}\\selectfont\\bfseries " .. pandoc.utils.stringify(el) .. "}\\end{center}\\vspace{0.35em}"),
+        pandoc.RawBlock("latex", "\\thispagestyle{firstpage}\\vspace*{-0.35em}\\begin{center}{\\fontsize{15.5}{19}\\selectfont\\bfseries " .. pandoc.utils.stringify(el) .. "}\\end{center}\\vspace{0.15em}"),
       }
     elseif el.level == 2 then
       local txt = pandoc.utils.stringify(el)
@@ -590,9 +607,9 @@ function Div(el)
       table.insert(out, pandoc.RawBlock("latex", "\\end{center}\\vspace{0.25em}"))
       return out
     elseif el.classes:includes("abstract") then
-      local out = { pandoc.RawBlock("latex", "\\begin{abstractbox}\\small\\setlength{\\parindent}{0pt}\\setlength{\\parskip}{3pt}") }
+      local out = { pandoc.RawBlock("latex", "\\begin{abstractbox}\\footnotesize\\linespread{1.05}\\selectfont\\setlength{\\parindent}{0pt}\\setlength{\\parskip}{2pt}") }
       for _, blk in ipairs(el.content) do table.insert(out, blk) end
-      table.insert(out, pandoc.RawBlock("latex", "\\end{abstractbox}\\vspace{0.35em}"))
+      table.insert(out, pandoc.RawBlock("latex", "\\end{abstractbox}\\vspace{0.25em}"))
       return out
     elseif el.classes:includes("references") then
       local out = { pandoc.RawBlock("latex", "\\begingroup\\small\\setlength{\\parindent}{0pt}\\setlength{\\parskip}{3pt}") }
@@ -654,12 +671,12 @@ _XELATEX_PREAMBLE = r"""
   linewidth=0pt,
   leftmargin=0pt,
   rightmargin=0pt,
-  innerleftmargin=10pt,
-  innerrightmargin=10pt,
-  innertopmargin=7pt,
-  innerbottommargin=7pt,
-  skipabove=3pt,
-  skipbelow=4pt
+  innerleftmargin=9pt,
+  innerrightmargin=9pt,
+  innertopmargin=6pt,
+  innerbottommargin=6pt,
+  skipabove=2pt,
+  skipbelow=3pt
 ]{abstractbox}
 \usepackage{float}
 \floatplacement{figure}{htbp}
