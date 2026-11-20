@@ -540,7 +540,7 @@ function Blocks(blocks)
   local i = 1
   while i <= #blocks do
     local blk = blocks[i]
-    if blk.t == "Para" and pandoc.utils.stringify(blk):match("^Table %d+%.") and i < #blocks and blocks[i + 1].t == "Table" then
+    if blk.t == "Para" and pandoc.utils.stringify(blk):match("^Table [A-Z]?%d+%.") and i < #blocks and blocks[i + 1].t == "Table" then
       local note_para = nil
       local step = 2
       if i + 2 <= #blocks and blocks[i + 2].t == "Para" then
@@ -564,10 +564,17 @@ function Blocks(blocks)
 end
 
 function Header(el)
-  if FORMAT:match "latex" and el.level == 1 then
-    return {
-      pandoc.RawBlock("latex", "\\thispagestyle{firstpage}\\vspace*{-0.35em}\\begin{center}{\\fontsize{15.5}{19}\\selectfont\\bfseries " .. pandoc.utils.stringify(el) .. "}\\end{center}\\vspace{0.2em}"),
-    }
+  if FORMAT:match "latex" then
+    if el.level == 1 then
+      return {
+        pandoc.RawBlock("latex", "\\thispagestyle{firstpage}\\vspace*{-0.35em}\\begin{center}{\\fontsize{15.5}{19}\\selectfont\\bfseries " .. pandoc.utils.stringify(el) .. "}\\end{center}\\vspace{0.2em}"),
+      }
+    elseif el.level == 2 and pandoc.utils.stringify(el):match("^Appendix:") then
+      return {
+        pandoc.RawBlock("latex", "\\clearpage"),
+        el,
+      }
+    end
   end
   return el
 end
@@ -831,7 +838,7 @@ def _style_docx_report(docx_path: Path) -> None:
 
         if txt == "Abstract":
             in_abstract = True
-        if sname.startswith("Heading") and "8.1 References" in txt:
+        if sname.startswith("Heading") and txt == "References":
             in_references = True
         elif sname.startswith("Heading") and in_references:
             in_references = False
@@ -884,7 +891,7 @@ def _style_docx_report(docx_path: Path) -> None:
             p.paragraph_format.space_after = Pt(3.5)
             for run in p.runs:
                 run.font.size = Pt(11)
-        elif re.match(r"^Table \d+\.", txt):
+        elif re.match(r"^Table [A-Z]?\d+\.", txt):
             p.alignment = WD_ALIGN_PARAGRAPH.LEFT
             p.paragraph_format.first_line_indent = Inches(0)
             p.paragraph_format.space_before = Pt(6)

@@ -51,11 +51,11 @@ With respect to the second research question—raw data-quality hazards and leak
 
 With respect to the third research question—whether the resulting panel supports an honestly validated operational EWS—our empirical results are strongly affirmative. Evaluated strictly once on the held-out 2009Q1–2025Q2 test set after selecting every design choice inside 1984Q1–2007Q4 walk-forward cross-validation, the 26-feature HistGradientBoosting champion achieves a test PR-AUC of 0.5478, ROC-AUC of 0.9854, and Brier score of 0.00238 (3.6x higher PR-AUC than the Texas Ratio benchmark of 0.1507). Remediating the post-2020 CBLR zero-as-missing artifact reduces false-alarm episodes at the calibrated cost-optimal threshold ($\theta^* = 0.0039$, $C_{\text{FP}} = \$250\text{k}$) from 3,721 to 2,707 (43.0 median alerts per quarter, 2.894% flagged rows) while capturing 469 / 485 failing banks (96.70% bank recall, 297.0 days median lead time) and lifting 2015–2025 ROC-AUC to 0.9193. Under fixed quarterly capacity budgets, inspecting the top 1% of banks per quarter catches 399 / 485 failing banks (82.27% recall, 20.95% row precision, 210.0 days median lead), while the top 2% catches 443 / 485 (91.34% recall, 286.0 days lead). Applying the frozen development model operationally to the unlabelled 2026Q2 cross-section (4,306 active banks) flags 26 institutions above $\theta^*$ for supervisory triage without touching the test partition.
 
-The remainder of this report is organized as follows. Section 2 details data acquisition, schema precision auditing, and lakehouse storage benchmarks (Part 1). Section 3 presents the automated data-quality audit and point-in-time panel construction (Part 2). Section 4 benchmarks Polars, Pandas, and PySpark across 1x–8x data scales and establishes the cluster-justification boundary (Part 3). Section 5 describes leak-free CAMELS feature engineering and empirical anti-leakage verification (Part 4). Section 6 reports walk-forward model comparison, cost-sensitive thresholding, held-out test evaluation, supervisory explainability, and historical canary diagnostics (Part 5). Section 7 discusses limitations and institutional adaptations required for the State Bank of Vietnam (Part 6), and Section 8 documents academic integrity, references, open-source comparisons, and full reproducibility.
+The remainder of this study is organized as follows. Section 2 details data acquisition, schema precision auditing, and lakehouse storage benchmarks. Section 3 presents the automated data-quality audit and point-in-time panel construction. Section 4 benchmarks Polars, Pandas, and PySpark across 1x–8x data scales and establishes the cluster-justification boundary. Section 5 describes leak-free CAMELS feature engineering and empirical anti-leakage verification. Section 6 reports walk-forward model comparison, cost-sensitive thresholding, held-out test evaluation, supervisory explainability, and historical canary diagnostics. Section 7 discusses limitations and institutional adaptations required for the State Bank of Vietnam.
 
 ---
 
-## 2. Data Acquisition and Lakehouse Storage Architecture (Part 1)
+## 2. Data Acquisition and Lakehouse Storage Architecture
 
 ### 2.1 Field Selection and Reproducible Acquisition
 
@@ -89,7 +89,7 @@ As reported in Table 2 and illustrated in Figure 1, Hive-partitioned Zstandard P
 
 ---
 
-## 3. Data Quality Audit and Point-in-Time Panel Construction (Part 2)
+## 3. Data Quality Audit and Point-in-Time Panel Construction
 
 ### 3.1 Automated Data Quality Audit Findings
 
@@ -143,7 +143,7 @@ Two additional point-in-time safeguards eliminate subtle survival and timing lea
 
 ---
 
-## 4. Scalable Processing: Polars, Pandas, and PySpark (Part 3)
+## 4. Scalable Processing: Polars, Pandas, and PySpark
 
 ### 4.1 Query Optimization in Polars
 
@@ -176,7 +176,7 @@ In `scripts/06_spark.py` (1.2 GB driver memory), PySpark Catalyst reproduces Pol
 
 ---
 
-## 5. Leak-Free CAMELS Feature Engineering (Part 4)
+## 5. Leak-Free CAMELS Feature Engineering
 
 ### 5.1 Supervisory Feature Design
 
@@ -204,7 +204,7 @@ Fitting preprocessors naively across the combined development and test panel int
 
 ---
 
-## 6. Modelling, Temporal Validation, and Cost-Sensitive Thresholding (Part 5)
+## 6. Modelling, Temporal Validation, and Cost-Sensitive Thresholding
 
 ### 6.1 Temporal Split Protocol and Walk-Forward Validation
 
@@ -332,7 +332,7 @@ Every top-five GFC credit-insolvency failure is flagged 129 to 304 days before c
 
 ---
 
-## 7. Conclusions, Limitations, and Adaptation for Vietnam (Part 6)
+## 7. Conclusions, Limitations, and Institutional Adaptation for Vietnam
 
 ### 7.1 Empirical Limitations
 
@@ -346,35 +346,37 @@ Second, regulatory accounting adjustments are essential under Vietnamese Account
 
 Third, because a cross-section of 35 banks is too small to sustain machine learning on quarterly balance sheets alone, an operational SBV EWS must fuse monthly regulatory filings with granular Credit Information Center (CIC) borrower-level credit registries (capturing cross-bank nonperforming-loan contagion and ecosystem or related-party concentration) and daily CITAD interbank payment and liquidity flows (detecting sudden retail deposit runs or interbank rate spikes in real time, as observed during the October 2022 SCB episode).
 
-Fourth, infrastructure sizing follows directly from our Part 3 scaling boundary. Bank-level monthly panels for approximately 50 institutions require less than 50 MB and execute instantaneously in single-node Polars. Once the SBV integrates tens of millions of quarterly CIC borrower exposures alongside daily CITAD payment streams, however, the active dataset scales into hundreds of gigabytes—crossing the exact 30–50 million row threshold established in Section 4 where the Bronze, Silver, and Gold Parquet lakehouse transitions from laptop Polars to an on-premise SBV Apache Spark cluster.
+Fourth, infrastructure sizing follows directly from the scaling boundary established in Section 4. Bank-level monthly panels for approximately 50 institutions require less than 50 MB and execute instantaneously in single-node Polars. Once the SBV integrates tens of millions of quarterly CIC borrower exposures alongside daily CITAD payment streams, however, the active dataset scales into hundreds of gigabytes—crossing the 30–50 million row threshold where the Bronze, Silver, and Gold Parquet lakehouse transitions from laptop Polars to an on-premise SBV Apache Spark cluster.
 
 ---
 
-## 8. Academic Integrity, References, and Reproducibility
+## Notes and Disclosures
 
-### 8.1 References
+1. *Reproducibility and data provenance:* The data-acquisition client was adapted from the instructor-provided starter script (`fdic_download_starter.py`). From a clean clone of the repository with raw data placed in `./data_raw/fdic` (or downloaded via `python scripts/00_download.py --download`), executing `bash run_all.sh` deterministically runs `01_storage.py` through `09_check_report_numbers.py` followed by `pytest tests/` (`seed = 42`), regenerating all tables, figures, notebooks, and this manuscript while logging per-step runtimes to `outputs/tables/run_all_timing.txt`.
+2. *AI tool disclosure:* Google Antigravity AI coding assistant was used for pair-programming pipeline modularization, debugging schema drift and PySpark configurations, and typesetting documentation. All experimental designs, empirical measurements, statistical tests, and supervisory interpretations were independently verified against local data outputs.
+3. *Open-source benchmarks:* All related public FDIC repositories reviewed during research design are documented alongside our methodological improvements in Appendix Table A1.
+
+## References
 
 <!-- BLOCK:REFERENCES:START -->
-Cole, R. A., & White, L. J. (2012). Déjà vu all over again: The causes of U.S. commercial bank failures this time around. *Journal of Financial Services Research*, 42(1), 5–29.
+Cole, R.A. and White, L.J. (2012), “Déjà vu all over again: the causes of U.S. commercial bank failures this time around”, *Journal of Financial Services Research*, Vol. 42 No. 1, pp. 5–29.
 
-Elkan, C. (2001). The foundations of cost-sensitive learning. *Proceedings of the 17th International Joint Conference on Artificial Intelligence (IJCAI)*, 973–978.
+Elkan, C. (2001), “The foundations of cost-sensitive learning”, *Proceedings of the 17th International Joint Conference on Artificial Intelligence (IJCAI)*, pp. 973–978.
 
-Federal Deposit Insurance Corporation (FDIC). (2024). *2024 Annual Report* (Division of Risk Management Supervision examination counts). Washington, DC: FDIC.
+Federal Deposit Insurance Corporation (FDIC) (2024), *2024 Annual Report*, Division of Risk Management Supervision examination counts, FDIC, Washington, DC.
 
-Federal Deposit Insurance Corporation (FDIC). (2025). *Proposed 2025 Operating Budget* (Division of Risk Management Supervision Ongoing Operations budget). Washington, DC: FDIC.
+Federal Deposit Insurance Corporation (FDIC) (2025), *Proposed 2025 Operating Budget*, Division of Risk Management Supervision Ongoing Operations budget, FDIC, Washington, DC.
 
-Federal Deposit Insurance Corporation (FDIC). (2026). *BankFind Suite Public REST API and RISView Field Dictionary*. Available at: [https://api.fdic.gov/banks/docs/](https://api.fdic.gov/banks/docs/) (accessed 5 November 2026).
+Federal Deposit Insurance Corporation (FDIC) (2026), *BankFind Suite Public REST API and RISView Field Dictionary*, available at: [https://api.fdic.gov/banks/docs/](https://api.fdic.gov/banks/docs/) (accessed 5 November 2026).
 
-Shumway, T. (2001). Forecasting bankruptcy more accurately: A simple hazard model. *The Journal of Business*, 74(1), 101–124.
+Shumway, T. (2001), “Forecasting bankruptcy more accurately: a simple hazard model”, *The Journal of Business*, Vol. 74 No. 1, pp. 101–124.
 
-Wheelock, D. C., & Wilson, P. W. (2000). Why do banks disappear? The determinants of U.S. bank failures and acquisitions. *Review of Economics and Statistics*, 82(1), 127–138.
+Wheelock, D.C. and Wilson, P.W. (2000), “Why do banks disappear? The determinants of U.S. bank failures and acquisitions”, *Review of Economics and Statistics*, Vol. 82 No. 1, pp. 127–138.
 <!-- BLOCK:REFERENCES:END -->
 
-### 8.2 Open-Source Repositories Consulted and AI Tool Disclosure
+## Appendix: Related Open-Source Repositories Consulted
 
-Per course academic integrity guidelines, Table 13 documents every public FDIC-related repository reviewed during research design together with the methodological limitations overcome in this pipeline. The data-acquisition client was adapted from the instructor-provided starter script (`fdic_download_starter.py`).
-
-**Table 13.** Comparative review of related public open-source repositories consulted during pipeline design.
+**Table A1.** Comparative review of related public open-source repositories consulted during pipeline design.
 
 | Open-Source Reference | Domain Focus and Inspiration Drawn | Methodological Improvements in Our Pipeline |
 | :--- | :--- | :--- |
@@ -387,8 +389,4 @@ Per course academic integrity guidelines, Table 13 documents every public FDIC-r
 | [`Zahivc/Bank-Bankruptcy-Predictions`](https://github.com/Zahivc/Bank-Bankruptcy-Predictions) | ML/DL experimentation for bank bankruptcy classification on FDIC extracts | Avoided SMOTE and random splits (severe temporal leakage and distorted priors) in favor of strict temporal splits and Elkan (2001) calibration |
 | [`zekaili/bank-loan-failure-prediction`](https://www.kaggle.com/code/zekaili/bank-loan-failure-prediction) | Reviewed during initial scoping for binary credit classification workflows | Targets retail consumer loan defaults rather than institutional bank Call Reports; excluded from pipeline implementation |
 
-*AI Tool Disclosure:* Google Antigravity AI coding assistant was used for pair-programming pipeline modularization, debugging schema drift and PySpark configurations, and typesetting documentation. All experimental designs, empirical measurements, statistical tests, and supervisory interpretations were independently verified against local data outputs.
-
-### 8.3 End-to-End Reproducibility
-
-From a clean clone of the repository with raw data placed in `./data_raw/fdic` (or downloaded via `python scripts/00_download.py --download`), executing `bash run_all.sh` deterministically runs `01_storage.py` through `09_check_report_numbers.py` followed by `pytest tests/` (`seed = 42`), regenerating all tables, figures, notebooks, and this report while logging per-step runtimes to `outputs/tables/run_all_timing.txt`.
+*Note(s):* Reviewed public repositories are documented in compliance with course academic integrity guidelines; all pipeline code, empirical benchmarks, and econometric evaluations in this study were authored independently.
