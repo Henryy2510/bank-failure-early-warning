@@ -1,318 +1,394 @@
-# A Big-Data Pipeline for Bank Failure Early Warning
-**NATIONAL ECONOMICS UNIVERSITY**  
-**Course:** BFT65B – Big Data Analytics in Finance (Final Individual Research Report)  
+# A Big-Data Pipeline for Bank Failure Early Warning: Storage Architecture, Point-in-Time Data Quality, and Cost-Sensitive Supervision
 
----
+<!-- BLOCK:TITLEMETA:START -->
+**Quản Hữu Nhật Minh**  
+*School of Banking and Finance, National Economics University, Hanoi, Vietnam*  
+Student ID: 11230998 | Course: BFT65B – Big Data Analytics in Finance | November 2026  
+Repository: [https://github.com/Henryy2510/big-data-financial-analyst](https://github.com/Henryy2510/big-data-financial-analyst)
+<!-- BLOCK:TITLEMETA:END -->
 
-### Submission
+<!-- BLOCK:ABSTRACT:START -->
+**Abstract**
 
-| Field | Details |
+**Purpose** – This study designs, benchmarks, and validates an end-to-end point-in-time big-data pipeline for banking supervision using 42 years of U.S. Federal Deposit Insurance Corporation (FDIC) Call Report filings (1984Q1–2026Q2). It addresses three operational questions: how to organize and process multi-decade bank panels on a single laptop versus a distributed Spark cluster, how to remediate structural defects in raw regulatory data without look-ahead bias, and whether an honestly validated early-warning system can deliver actionable supervisory rankings.
+
+**Design/methodology/approach** – We construct a Medallion Lakehouse architecture (Bronze, Silver, and Gold layers) in Hive-partitioned Zstandard Parquet, implement automated data-quality audits and causal point-in-time transformations in Polars, verify exact numerical parity against PySpark at equal 4-thread concurrency, and evaluate 26 CAMELS features under expanding walk-forward cross-validation in a development sample (1984Q1–2007Q4) separated by a 4-quarter purge (2008) from a strictly held-out test set (2009Q1–2025Q2).
+
+**Findings** – Hive-partitioned Zstandard Parquet compresses raw CSV storage by 2.76x (425.7 MB to 154.1 MB). Across a 1x–8x stress test up to 13.46 million rows, Polars Streaming finishes in 4.271 s (2,499 MB peak RSS; 101.0 MB per million rows) and outperforms 4-thread PySpark by 7.0x end-to-end at 4x scale (15.182 s vs. 2.173 s). Remediating eight structural data defects—most notably the post-2020 Community Bank Leverage Ratio zero-as-missing regime affecting 37.15% of modern filings—cuts false-alarm episodes by 27%. On the held-out test set (485 failures across 400,332 bank-quarters), the champion HistGradientBoosting model attains a PR-AUC of 0.5478 (3.6x above the Texas Ratio baseline of 0.1507) and a ROC-AUC of 0.9854. At the development-calibrated cost-optimal threshold ($\theta^* = 0.0039$, invariant over $C_{\text{FP}} \in [\$231.1\text{k},\, \$519.9\text{k}]$), it flags 469 / 485 failing banks (96.70% recall, 297.0 days median lead time, 43.0 median alerts per quarter).
+
+**Regulatory implications** – A single-node columnar Polars stack suffices for bank-level Call Reports below 30–50 million rows; distributed Spark clusters become economically justified only when integrating granular loan-level credit registries or high-frequency payment streams, such as Vietnam's CIC and CITAD infrastructures under State Bank of Vietnam supervision.
+
+**Keywords:** Bank failure early warning; Big-data lakehouse; Polars; PySpark; CAMELS; Point-in-time validation; Cost-sensitive thresholding  
+**JEL Classification:** G21, G28, C53, C55
+<!-- BLOCK:ABSTRACT:END -->
+
+**Table 1.** Data coverage, temporal sample splits, and reproducibility scope.
+
+| Attribute | Scope and Quantitative Specification |
 | :--- | :--- |
-| **Student Name** | Quản Hữu Nhật Minh |
-| **Student ID** | `11230998` |
-| **Public GitHub Repository** | https://github.com/Henryy2510/big-data-financial-analyst |
-| **Data Source & Method** | FDIC BankFind Suite Public REST API (`https://api.fdic.gov/banks`) via resumable Python downloader (`scripts/00_download.py --download` / `fdic_download_starter.py`) |
-| **Download & Audit Date** | `2026-11-05` (`manifest_financials.json`, `failures.parquet`, and `institutions.parquet` 100% verified against API metadata totals) |
-| **Raw Table Row Counts** | **Financials:** `1,682,616` bank-quarters (`170` quarters, `1984Q1–2026Q2`, `24,064` distinct `CERT`s, `0` duplicate keys)<br>**Failures:** `4,117` total historical resolutions (`3,275` in `1984–2026`; `3,211` matched to active panel `CERT`s)<br>**Institutions:** `27,835` structural bank records |
-| **Development Period (`DEV`)** | **`1984Q1 – 2007Q4`** (`96` quarters): **`1,224,815`** bank-quarters (`1,223,542` pit-scorable), **`23,776`** distinct banks, **`2,661`** total pit-scorable failing banks (`1,522` failing banks inside the 5 walk-forward OOF validation blocks of `760,559` rows), **`8,844`** pit-scorable pre-failure quarters ($y_{i,q}=1$, base rate **$0.723\%$**; spans the 1984–1993 S&L and commercial banking crisis) |
-| **Purge / Embargo Gap (`PURGE`)** | **`2008Q1 – 2008Q4`** (`4` quarters): **`33,966`** bank-quarters (`33,922` pit-scorable) — enforces a strict 4-quarter embargo so no 4-quarter forward label from the development period overlaps the test set |
-| **Held-Out Test Period (`TEST`)** | **`2009Q1 – 2025Q2`** (`66` quarters): **`400,698`** bank-quarters (`400,332` pit-scorable), **`8,451`** distinct banks, **`485`** failing banks, **`1,409`** pit-scorable pre-failure quarters ($y_{i,q}=1$, base rate **$0.352\%$**; spans the 2009–2014 Global Financial Crisis and 2023 modern banking stress) |
-| **Right-Censored Tail (`POST_SAMPLE`)** | **`2025Q3 – 2026Q2`** (`4` quarters): **`17,501`** bank-quarters (`4,306` pit-scorable active banks in `2026Q2`) excluded from supervised training/testing because 4Q labels are unobservable; scored operationally at `2026-06-30` by the frozen `DEV` model as a live illustration |
+| Data Source and Acquisition | FDIC BankFind Suite Public REST API (`https://api.fdic.gov/banks`) via resumable Python client (`scripts/00_download.py`); verified against API totals on 2026-11-05 |
+| Raw Relational Tables | Financials: 1,682,616 bank-quarters (170 quarters, 1984Q1–2026Q2, 24,064 distinct CERTs, 0 duplicate keys); Failures: 4,117 historical resolutions (3,275 in 1984–2026; 3,211 matched to active panel CERTs); Institutions: 27,835 structural bank records |
+| Development Sample (DEV) | 1984Q1–2007Q4 (96 quarters): 1,224,815 rows (1,223,542 pit-scorable), 23,776 banks, 2,661 pit-scorable failing banks (1,522 failing banks in 5 walk-forward OOF blocks covering 760,559 rows), 8,844 pre-failure quarters ($y_{i,q}=1$, base rate 0.723%) |
+| Purge / Embargo Gap (PURGE) | 2008Q1–2008Q4 (4 quarters): 33,966 rows (33,922 pit-scorable) enforcing a strict 4-quarter embargo so no development forward label overlaps the test window |
+| Held-Out Test Set (TEST) | 2009Q1–2025Q2 (66 quarters): 400,698 rows (400,332 pit-scorable), 8,451 banks, 485 failing banks, 1,409 pre-failure quarters ($y_{i,q}=1$, base rate 0.352%; spans the 2009–2014 Global Financial Crisis and 2023 stress) |
+| Right-Censored Tail (POST\_SAMPLE) | 2025Q3–2026Q2 (4 quarters): 17,501 rows (4,306 pit-scorable active banks in 2026Q2) excluded from supervised training and testing; scored operationally at 2026-06-30 by the frozen DEV model |
+
+*Note(s):* All raw acquisition checksums and API row-count reconciliations are logged in `manifest_financials.json`, `outputs/tables/gold_split_summary.csv`, and `outputs/tables/frozen_protocol.json`.
 
 ---
 
-## 1. Executive Summary & Synthesis of Research Questions
+## 1. Introduction
 
-Central bank banking supervision departments require an early-warning system (EWS) that continuously ingests regulatory filings, audits data quality without human intervention, and ranks institutions by insolvency risk strictly on point-in-time information. Using 42 years of US Federal Deposit Insurance Corporation (FDIC) Call Report data (`1984Q1–2026Q2`), this project designs and benchmarks an end-to-end **Medallion Lakehouse Pipeline** (`Bronze` $\rightarrow$ `Silver` $\rightarrow$ `Gold`) implemented in **Polars**, **PyArrow**, **PySpark**, and **scikit-learn**.
+Banking supervision agencies rely on continuous early-warning systems (EWS) to prioritize scarce on-site examination capacity and resolve distressed depository institutions before losses compound on the deposit insurance fund. Prior empirical research confirms that accounting-based CAMELS indicators carry strong predictive power for U.S. bank insolvencies (Wheelock & Wilson, 2000; Shumway, 2001; Cole & White, 2012). Yet translating historical supervisory filings into a production-grade EWS is predominantly a big-data engineering and temporal-integrity challenge: four decades of quarterly regulatory reports suffer from evolving form schemas, regime-specific zero-coding conventions, cumulative income flows, competing merger exits, and publication delays that routinely invalidate naive machine-learning pipelines.
 
-### Summary Answers to the Three Core Questions
+This study builds and empirically evaluates an end-to-end Medallion Lakehouse pipeline (Bronze, Silver, and Gold layers) over 42 years of FDIC Call Report data (1984Q1–2026Q2) implemented in Polars, PyArrow, PySpark, and scikit-learn. Our investigation is organized around three core research questions corresponding to the engineering, data-quality, and supervisory-decision stages of the workflow.
 
 <!-- SYNC:START:REPORT_Q1 -->
-* **Q1 (Storage, Laptop Processing & When a Spark Cluster is Needed):**  
-  Four decades of quarterly bank reports (`1.68M` rows $\times$ `33` fields) compress from **425.7 MB** in raw uncompressed CSV down to **154.1 MB** (`2.76x` compression; write time **0.922 s**) when stored as **Hive-partitioned Apache Parquet** (`YEAR=YYYY`) with **Zstandard (level 3)** compression, explicit canonical typing (`Int32` keys, `Date32`, `Float64` measures), and sorted `(REPDTE, CERT)` row groups. On our measured **1x–8x multi-scale stress test** (`1.68M` up to **`13.46M` rows**, `12` logical CPUs, `15.34 GB` RAM, `POLARS_MAX_THREADS=4`), **Polars Streaming** completes **`13.46M` rows in `4.271 s`** (`2,499 MB` peak RSS) and **Polars Lazy** in `10.406 s` (`2,569 MB`), scaling at only **`101.0 MB / million rows`** (`~151.1M` rows capacity in `16 GB` RAM) compared with **`327.9 MB / million rows`** for **Pandas + pushdown** (`48.5M` rows limit) and **`1,940 MB`** at `1x` alone for **Pandas Naive**. At equal **4-thread** concurrency, local **PySpark 4.3 (`local[4]`)** reproduces identical numeric results ($7.4 \times 10^{-15}$ yearly-sum parity, $0.000$ sample max diff) in **`10.551 s` at `1x`** (`1,262.9 MB` Python+JVM tree RSS) and **`15.182 s` at `4x` (`6.73M` rows, `1,807.8 MB` tree RSS; `local[2]`: `16.163 s`)**. A distributed Spark cluster is therefore **unnecessary** for quarterly bank-level Call Reports (`<30M` rows fit comfortably in Polars on a laptop), and becomes justified only when expanding to ~2,400 regulatory schedules, borrower-level credit registries ($>10^8$ rows), or high-frequency interbank settlement streams exceeding ~32–64 GB single-node memory.
+With respect to the first research question—storage layout, laptop-scale processing, and the economic threshold for a distributed Spark cluster—four decades of quarterly bank reports (1.68 million rows across 33 fields) compress from 425.7 MB in raw uncompressed CSV down to 154.1 MB (2.76x compression; write time 0.922 s) when stored as Hive-partitioned Apache Parquet (YEAR=YYYY) with Zstandard level-3 compression, explicit canonical typing (Int32 keys, Date32 dates, Float64 measures), and sorted (REPDTE, CERT) row groups. On a measured 1x–8x multi-scale stress test spanning 1.68 million up to 13.46 million rows (12 logical CPUs, 15.34 GB RAM, 4 Polars threads), Polars Streaming completes 13.46 million rows in 4.271 s (2,499 MB peak RSS) and Polars Lazy finishes in 10.406 s (2,569 MB), scaling at only 101.0 MB per million rows (an extrapolated ceiling of 151.1 million rows in 16 GB RAM) compared with 327.9 MB per million rows for Pandas with pushdown (48.5 million row ceiling) and 1,940 MB at 1x alone for naive Pandas. At equal 4-thread concurrency, local PySpark 4.3 (`local[4]`) reproduces identical numeric results ($7.4 \times 10^{-15}$ yearly-sum parity, $0.000$ sample maximum difference) in 10.551 s at 1x (1,262.9 MB Python+JVM tree RSS) and 15.182 s at 4x (6.73 million rows, 1,807.8 MB tree RSS; `local[2]`: 16.163 s). A distributed Spark cluster is therefore unnecessary for quarterly bank-level Call Reports—panels below 30–50 million rows fit comfortably in Polars on a standard laptop—and becomes justified only when expanding to roughly 2,400 regulatory schedules, borrower-level credit registries exceeding $10^8$ rows, or high-frequency interbank settlement streams exceeding 32–64 GB single-node memory.
 <!-- SYNC:END:REPORT_Q1 -->
-* **Q2 (Raw Data Quality Problems & Leak-Free Point-in-Time Remediation):**  
-  Our automated audit (`src/bfews/quality.py`) detects eight structural defects in raw FDIC tables: (i) **cross-quarter schema drift** across `14` columns, (ii) **structural era missingness** (`P3ASSET` 100% null pre-2001), (iii) **dual zero-as-missing regimes** (`RBC1AAJ == 0` in **`18.13%`** of pre-1990 rows before Basel I, *and* **`RBCRWAJ == 0` in `37.15%` (`45,865 / 123,461`) of `2020–2026` rows** where **`45,423`** healthy community banks opted into the Community Bank Leverage Ratio [CBLR] and ceased RWA reporting!), (iv) **negative stock anomalies** (`ORE < 0`: `646` rows, `SC < 0`: `96` rows), (v) **cumulative YTD income flows** rising 3.9x monotonically from Q1 (`0.0177`) to Q4 (`0.0689`) of `INTINC/ASSET` while annualized `ROA` stays flat (`~0.97%`), (vi) **negative equity & insolvency inversion** (`EQ < 0`: `15,659` rows, handled by capping `texas_ratio` at `10.0`), (vii) **competing exits** verified against `CHANGEC1` (`16,892` `MERGED_OR_OTHER` censored vs. `2,859` `FAILED` vs. `4,313` `ACTIVE`), and (viii) **60-day publication lag** (`59.1%` final quarters `pit_scorable = False`). All cleaning is causal (`<= REPDTE`), and our train-only sklearn pipeline eliminates up to `20.95%` upper-quantile (`brokered_dep_ratio`) / `43.04%` median leakage shifts.
-* **Q3 (Support for an Honestly Validated & Operational Early-Warning System):**  
-  Yes. Evaluated strictly once after selecting all design choices via 5-block expanding walk-forward CV in `DEV` (`1984Q1–2007Q4`, separated by the `2008` purge), our 26-feature **HistGradientBoosting** model achieves **TEST PR-AUC = `0.5478`**, **ROC-AUC = `0.9854`**, and **Brier = `0.00238`** (`3.6x` higher PR-AUC than **Texas Ratio `0.1507`**). Fixing the CBLR post-2020 zero-as-missing bug cuts false-alarm episodes at the calibrated threshold **$\theta^* = 0.0039$** ($C_{\text{FP}} = \$250\text{k}$) from `3,721` down to **`2,707`** (`43.0` median alerts/qtr, **`2.894%`** flagged rows) while capturing **`469 / 485` (`96.70%`)** of failing banks (**`297.0` days** median lead time) and lifting Modern `2015–2025` ROC-AUC to **`0.9193`**. Under fixed budgets, **Top 1%/qtr** catches **`82.27%` (`399 / 485`)** banks (`20.95%` row precision, `210 d` lead) and **Top 2%/qtr** catches **`91.34%` (`443 / 485`)** (`286 d` lead). Scoring the live unlabelled `2026-06-30` cross-section (`4,306` active banks) flags **`26` banks** above $\theta^*$ for supervisory triage without touching `TEST`.
+
+With respect to the second research question—raw data-quality hazards and leak-free remediation—our automated audit detects eight structural defects in raw FDIC tables: (i) cross-quarter schema drift across 14 columns; (ii) non-random era missingness, such as P3ASSET being 100% null prior to 2001; (iii) dual zero-as-missing regimes, wherein RBC1AAJ equals zero in 18.13% of pre-1990 filings before Basel I and RBCRWAJ equals zero in 37.15% (45,865 of 123,461) of 2020–2026 rows because 45,423 healthy community banks elected the Community Bank Leverage Ratio (CBLR) framework and ceased risk-weighted asset reporting; (iv) negative stock balance anomalies (646 rows with negative ORE and 96 rows with negative securities); (v) cumulative year-to-date income flows rising nearly fourfold monotonically from Q1 (0.0177) to Q4 (0.0689) of interest income over assets while annualized ROA stays flat near 0.97%; (vi) negative equity and denominator inversion across 15,659 rows; (vii) competing exit pathways audited via FDIC CHANGEC1 codes (16,892 censored mergers versus 2,859 failures and 4,313 active survivors); and (viii) a 60-day Call Report publication lag under which 59.1% of failed banks' final filings are non-scorable in real time. All cleaning transformations operate strictly causally ($\le \text{REPDTE}$), and fitting preprocessors exclusively on training folds eliminates up to 20.95% upper-quantile and 43.04% median parameter leakage shifts.
+
+With respect to the third research question—whether the resulting panel supports an honestly validated operational EWS—our empirical results are strongly affirmative. Evaluated strictly once on the held-out 2009Q1–2025Q2 test set after selecting every design choice inside 1984Q1–2007Q4 walk-forward cross-validation, the 26-feature HistGradientBoosting champion achieves a test PR-AUC of 0.5478, ROC-AUC of 0.9854, and Brier score of 0.00238 (3.6x higher PR-AUC than the Texas Ratio benchmark of 0.1507). Remediating the post-2020 CBLR zero-as-missing artifact reduces false-alarm episodes at the calibrated cost-optimal threshold ($\theta^* = 0.0039$, $C_{\text{FP}} = \$250\text{k}$) from 3,721 to 2,707 (43.0 median alerts per quarter, 2.894% flagged rows) while capturing 469 / 485 failing banks (96.70% bank recall, 297.0 days median lead time) and lifting 2015–2025 ROC-AUC to 0.9193. Under fixed quarterly capacity budgets, inspecting the top 1% of banks per quarter catches 399 / 485 failing banks (82.27% recall, 20.95% row precision, 210.0 days median lead), while the top 2% catches 443 / 485 (91.34% recall, 286.0 days lead). Applying the frozen development model operationally to the unlabelled 2026Q2 cross-section (4,306 active banks) flags 26 institutions above $\theta^*$ for supervisory triage without touching the test partition.
+
+The remainder of this report is organized as follows. Section 2 details data acquisition, schema precision auditing, and lakehouse storage benchmarks (Part 1). Section 3 presents the automated data-quality audit and point-in-time panel construction (Part 2). Section 4 benchmarks Polars, Pandas, and PySpark across 1x–8x data scales and establishes the cluster-justification boundary (Part 3). Section 5 describes leak-free CAMELS feature engineering and empirical anti-leakage verification (Part 4). Section 6 reports walk-forward model comparison, cost-sensitive thresholding, held-out test evaluation, supervisory explainability, and historical canary diagnostics (Part 5). Section 7 discusses limitations and institutional adaptations required for the State Bank of Vietnam (Part 6), and Section 8 documents academic integrity, references, open-source comparisons, and full reproducibility.
 
 ---
 
-## 2. Part 1: Data Acquisition & Storage Architecture [15 pts]
+## 2. Data Acquisition and Lakehouse Storage Architecture (Part 1)
 
-### 2.1 Field Selection & Reproducible Acquisition
-The pipeline ingests three relational tables linked by FDIC certificate number (`CERT`): **`Financials`** (`1,682,616` rows, `170` quarters `1984Q1–2026Q2`, `3` keys + `30` CAMELS fields spanning capital, liquidity, loans, delinquency, and earnings), **`Failures`** (`4,117` events since 1934), and **`Institutions`** (`27,835` records). Newer fields absent prior to 1994/2017 (`DEPUNINS`, `SCHA`/`SCHF`) are excluded from training features to prevent historical availability bias across 1984–1993 (`Section 7.1`). Acquisition (`scripts/00_download.py --download` / `fdic_download_starter.py`) is fully **resumable**: each quarter writes atomically only after matching API metadata totals in `manifest_financials.json`, skips already-verified quarters on restart, and retries HTTP `429`/`5xx` errors with exponential backoff. Offline verification (`--verify-only`) confirms `170/170` complete quarters with `0` duplicate keys.
+### 2.1 Field Selection and Reproducible Acquisition
 
-### 2.2 Storage Layout Design, Float64 Precision Audit & Empirical Benchmarks
-We design the **Bronze Layer (`data/bronze/financials`)** with explicit Arrow typing (`Int32 CERT`, `Date32 REPDTE`, dictionary `STNAME`, `Float64` measures), **Hive `YEAR=YYYY` partitioning** (`43` directories averaging `~3.6 MB`/file instead of `170` small `<1 MB` quarterly files that inflate file-listing metadata overhead), `(REPDTE, CERT)` intra-partition sorting (`row_group_size = 50,000`), and **Zstandard level 3** compression.
+The ingestion pipeline retrieves three relational FDIC tables keyed by certificate number (CERT): Financials (1,682,616 bank-quarter rows across 170 quarters from 1984Q1 through 2026Q2, comprising 3 identifiers and 30 CAMELS financial fields spanning capital, asset quality, liquidity, loan composition, and earnings), Failures (4,117 historical resolution records since 1934), and Institutions (27,835 structural bank records). Fields introduced only after 1994 or 2017—such as uninsured deposits (DEPUNINS) and held-to-maturity securities schedules (SCHA and SCHF)—are intentionally omitted from the uniform 42-year training schema to prevent historical availability bias across 1984–1993, and their omission is revisited in Section 7.1.
 
-**Why `Float64` Rather Than `Float32` (`outputs/tables/part1_float32_check.csv`):** Because IEEE-754 `Float32` preserves exact integers only up to $2^{24} = 16,777,216$ (`~$16.8B`), **`11,485` `ASSET` rows** (max `$4.09T`), **`8,706` `DEP` rows**, and **`1,652` `EQ` rows** exceed exact integer representation—inducing quantization rounding errors up to **`$128k` on `ASSET`** and **`$120k` on `DEP`**, justifying `Float64` retention in `SCHEMA`.
+Acquisition is implemented as a fully resumable client (`scripts/00_download.py --download`, adapted from the course starter script). Each quarterly request paginates deterministically by CERT, verifies the returned row count against the API's reported metadata total before atomically writing the quarterly file, records completion status in `manifest_financials.json`, skips already-verified quarters upon restart, and retries transient HTTP 429 or 5xx responses with exponential backoff. Offline verification (`--verify-only`) confirms 170 of 170 complete quarters with zero duplicate (CERT, REPDTE) primary keys.
 
-**Empirical Storage Benchmark (`outputs/tables/part1_storage_benchmark.csv`):**
+### 2.2 Storage Layout, Float64 Precision Audit, and Empirical Benchmarks
+
+The Bronze layer (`data/bronze/financials`) enforces an explicit Apache Arrow schema: Int32 for CERT, Date32 for REPDTE, dictionary-encoded UTF-8 for state names (STNAME), and IEEE-754 Float64 for all monetary and ratio measures. Files are stored in Hive-style annual partitions (`YEAR=YYYY`), producing 43 compact directory files averaging roughly 3.6 MB per file rather than 170 sub-megabyte quarterly files that would inflate filesystem listing and Parquet footer overhead. Within each annual partition, rows are sorted by (REPDTE, CERT) with a 50,000-row group size and compressed using Zstandard level 3.
+
+Retaining Float64 rather than downcasting monetary balances to Float32 is empirically necessary rather than conservative. Because IEEE-754 Float32 represents integers exactly only up to $2^{24} = 16,777,216$ (approximately $16.8 billion in thousands of dollars), our precision audit reveals that 11,485 ASSET rows (maximum $4.09 trillion), 8,706 DEP rows, and 1,652 EQ rows exceed exact Float32 integer resolution, introducing quantization rounding errors up to $128k on total assets and $120k on deposits (`outputs/tables/part1_float32_check.csv`).
 
 <!-- SYNC:START:REPORT_PART1_TABLE -->
-| Storage Format & Layout | Disk Size (MB) | Compression | Write (s) | Full Scan (s) | 3-Col Proj (s) | `YEAR=2023` Filter (s) |
+**Table 2.** Storage layout, compression ratio, and query-latency benchmark across 170 quarters of FDIC financials.
+
+| Storage Format and Layout | Disk Size (MB) | Compression | Write (s) | Full Scan (s) | 3-Col Proj (s) | YEAR=2023 Filter (s) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Raw CSV (Uncompressed)** | `425.7` | `1.00x` | `0.770` | `0.683` | `0.220` | `0.988` |
-| **Single Parquet (Snappy)** | `210.8` | `2.02x` | `0.296` | `0.229` | `0.033` | `0.031` |
-| **Single Parquet (Zstd L3)** | `153.8` | `2.77x` | `0.589` | `0.210` | `0.037` | `0.036` |
-| **Hive Parquet (`YEAR=`, Zstd L3, Chosen)** | **`154.1`** | **`2.76x`** | `0.922` | **`0.233`** | **`0.042`** | **`0.040`** |
-| **Pandas Baseline (`read_csv` / `read_parquet`)** | `425.7` / `153.8` | `1.00x` / `2.77x` | — | `0.680` / `0.491` | — | — |
+| Raw CSV (Uncompressed) | 425.7 | 1.00x | 0.770 | 0.683 | 0.220 | 0.988 |
+| Single Parquet (Snappy) | 210.8 | 2.02x | 0.296 | 0.229 | 0.033 | 0.031 |
+| Single Parquet (Zstd L3) | 153.8 | 2.77x | 0.589 | 0.210 | 0.037 | 0.036 |
+| **Hive Parquet (YEAR=, Zstd L3, Chosen)** | **154.1** | **2.76x** | **0.922** | **0.233** | **0.042** | **0.040** |
+| Pandas Baseline (read\_csv / read\_parquet) | 425.7 / 153.8 | 1.00x / 2.77x | — | 0.680 / 0.491 | — | — |
+
+*Note(s):* All timings report wall-clock medians across repeated reads of the 1,682,616-row panel in Polars (4 threads) unless designated as Pandas. Source measurements are stored in `outputs/tables/part1_storage_benchmark.csv`.
 <!-- SYNC:END:REPORT_PART1_TABLE -->
 
-![Storage Layout & Compression Benchmark](../outputs/figures/part1_storage_comparison.png)
+As reported in Table 2 and illustrated in Figure 1, Hive-partitioned Zstandard Parquet reduces disk footprint by 2.76x relative to raw CSV (154.1 MB vs. 425.7 MB) with negligible metadata overhead over single-file Zstandard (0.3 MB), while accelerating 3-column projections by 5.2x (0.042 s vs. 0.220 s) and single-year temporal slices by 24.7x (0.040 s vs. 0.988 s) through partition pruning.
+
+![Storage layout, compression ratio, and query-latency benchmark across raw CSV, Snappy, Zstandard, and Hive-partitioned Parquet.](../outputs/figures/part1_storage_comparison.png)
 
 ---
 
-## 3. Part 2: Data Quality Audit & Point-in-Time Panel [20 pts]
+## 3. Data Quality Audit and Point-in-Time Panel Construction (Part 2)
 
 ### 3.1 Automated Data Quality Audit Findings
-Running `scripts/02_quality.py` produces an automated audit report (`outputs/dq_report/data_quality_report.md` and `outputs/tables/dq_summary.json`). We identify eight systematic structural defects in the raw FDIC tables—six table-level defects below (grouped into items 1–5, covering negative stock balances and negative-equity inversion) plus competing-exit ambiguity and publication-lag truncation in Section 3.2:
 
-1. **Cross-Quarter Schema Drift (`14` columns affected):**  
-   In quarters where no bank reported fractional values or where a schedule was omitted, the FDIC JSON-to-Parquet serializer inferred `int64` or `null` instead of `double` for 14 columns (`LNLSGR`, `DEPDOM`, `NAASSET`, `RBCRWAJ`, `CHBAL`, `LNRE`, `P9ASSET`, `LNLSNET`, `NCLNLS`, `LNCON`, `LNCI`, `SC`, `P3ASSET`, `DEP`). Attempting a naive `pl.scan_parquet("*.parquet")` raises `SchemaError: data type mismatch`. Our Bronze ingestion resolves this via strict per-file schema casting.
-2. **Non-Random Structural Missingness Across Regulatory Eras:**  
-   Missingness varies sharply across decades due to FFIEC Call Report form revisions rather than random non-response:
+Executing the automated audit (`scripts/02_quality.py`) generates a complete diagnostic report (`outputs/dq_report/data_quality_report.md` and `outputs/tables/dq_summary.json`). Across the raw FDIC tables, we identify eight systematic structural defects—six table-level anomalies summarized below alongside competing-exit ambiguity and publication-lag truncation in Section 3.2.
 
-| 5-Year Era | Panel Rows | `P3ASSET` Null % | `P9ASSET` Null % | `NAASSET` Null % | `ELNATR` Null % | `NTLNLS` Null % | `RBC1AAJ` Null % | `EQ` Null % |
+First, cross-quarter schema drift affects 14 numeric columns (LNLSGR, DEPDOM, NAASSET, RBCRWAJ, CHBAL, LNRE, P9ASSET, LNLSNET, NCLNLS, LNCON, LNCI, SC, P3ASSET, and DEP). Whenever a quarterly API response lacks fractional observations or omits a schedule, naive JSON-to-Parquet inference assigns Int64 or Null types instead of Float64, causing a direct wildcard scan (`pl.scan_parquet`) to fail with a schema mismatch error. Our Bronze ingestion eliminates this failure mode through deterministic per-file Arrow casting.
+
+Second, missingness is strongly non-random across decades due to FFIEC Call Report form revisions rather than idiosyncratic reporting omissions. As documented in Table 3 and plotted in Figure 2, 30–89 day past-due assets (P3ASSET) are 100.0% null prior to 2001, while 90+ day past-due assets (P9ASSET), nonaccrual assets (NAASSET), loan-loss provisions (ELNATR), and net charge-offs (NTLNLS) exhibit 18%–19% structural missingness during the 1984–1989 period.
+
+**Table 3.** Structural missingness (%) of core FDIC Call Report variables across five-year regulatory eras.
+
+| 5-Year Era | Panel Rows | P3ASSET (%) | P9ASSET (%) | NAASSET (%) | ELNATR (%) | NTLNLS (%) | RBC1AAJ (%) | EQ (%) |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1980–1984** | `71,760` | **`100.0%`** | `19.2%` | `19.2%` | `18.5%` | `18.5%` | `0.0%` | `0.2%` |
-| **1985–1989** | `347,654` | **`100.0%`** | `18.4%` | `18.4%` | `7.6%` | `18.2%` | `0.0%` | `0.2%` |
-| **1990–1994** | `286,105` | **`100.0%`** | `0.0%` | `0.0%` | `0.3%` | `0.3%` | `0.0%` | `0.3%` |
-| **1995–1999** | `225,775` | **`100.0%`** | `0.0%` | `0.0%` | `0.3%` | `0.3%` | `0.0%` | `0.3%` |
-| **2000–2004** | `192,271` | **`21.1%`** | `0.0%` | `0.0%` | `0.2%` | `0.2%` | `0.0%` | `0.2%` |
-| **2005–2009** | `172,995` | `0.0%` | `0.0%` | `0.0%` | `0.2%` | `0.2%` | `0.0%` | `0.2%` |
-| **2010–2014** | `145,726` | `0.0%` | `0.0%` | `0.0%` | `0.2%` | `0.2%` | `0.0%` | `0.2%` |
-| **2015–2019** | `116,869` | `0.0%` | `0.0%` | `0.0%` | `0.3%` | `0.3%` | `0.0%` | `0.3%` |
-| **2020–2024** | `96,902` | `0.0%` | `0.0%` | `0.0%` | `0.4%` | `0.4%` | `0.0%` | `0.4%` |
-| **2025–2026** | `26,559` | `0.0%` | `0.0%` | `0.0%` | `0.4%` | `0.4%` | `0.0%` | `0.4%` |
+| 1980–1984 | 71,760 | 100.0 | 19.2 | 19.2 | 18.5 | 18.5 | 0.0 | 0.2 |
+| 1985–1989 | 347,654 | 100.0 | 18.4 | 18.4 | 7.6 | 18.2 | 0.0 | 0.2 |
+| 1990–1994 | 286,105 | 100.0 | 0.0 | 0.0 | 0.3 | 0.3 | 0.0 | 0.3 |
+| 1995–1999 | 225,775 | 100.0 | 0.0 | 0.0 | 0.3 | 0.3 | 0.0 | 0.3 |
+| 2000–2004 | 192,271 | 21.1 | 0.0 | 0.0 | 0.2 | 0.2 | 0.0 | 0.2 |
+| 2005–2009 | 172,995 | 0.0 | 0.0 | 0.0 | 0.2 | 0.2 | 0.0 | 0.2 |
+| 2010–2014 | 145,726 | 0.0 | 0.0 | 0.0 | 0.2 | 0.2 | 0.0 | 0.2 |
+| 2015–2019 | 116,869 | 0.0 | 0.0 | 0.0 | 0.3 | 0.3 | 0.0 | 0.3 |
+| 2020–2024 | 96,902 | 0.0 | 0.0 | 0.0 | 0.4 | 0.4 | 0.0 | 0.4 |
+| 2025–2026 | 26,559 | 0.0 | 0.0 | 0.0 | 0.4 | 0.4 | 0.0 | 0.4 |
 
-![Structural Missingness Across Eras](../outputs/figures/missingness_by_era.png)
+*Note(s):* Values report the share of null entries per era across all 1,682,616 raw financial rows. Zero null rates for RBC1AAJ in 1984–1989 mask structural zero-as-missing coding analyzed in Section 3.1 (`outputs/tables/dq_summary.json`).
 
-3. **Dual Basel / CBLR Zero-as-Missing Regimes (`RBC1AAJ` and `RBCRWAJ`, `dq_zero_as_missing.csv`):**  
-   * **Pre-1990 Basel I transition (`1984–1989`):** `RBCRWAJ == 0` in `100.0%` and `RBC1AAJ == 0` in **`18.13%`** of rows before risk-based capital reporting began. Post-1989 `RBC1AAJ == 0` appears in `3,458` rows (`3,369` of which have `EQ IS NULL`).
-   * **Post-2020 Community Bank Leverage Ratio (`CBLR`, `2020–2026`):** `RBCRWAJ == 0` jumps from `0.22%–0.31%` (1990–2019) to **`37.15%` (`45,865 / 123,461` rows)** in `2020–2026`, with **`45,423` (`36.79%`)** reporting healthy positive Tier 1 leverage (`RBC1AAJ > 0`). Qualifying community banks electing CBLR since 2020 are legally exempt from risk-weighted asset filing; per FDIC's RISView API specification (`risview_properties.yaml`, `x-source-mapping`), API-derived percentage ratios default to literal `0` rather than `NULL` when underlying denominators are null, non-positive, or exempt—mislabeling over a third of healthy modern banks as capital-depleted if left untreated. In `src/bfews/features.py`, we recode `RBC1AAJ == 0` (when pre-1990 or `EQ IS NULL`) and `RBCRWAJ == 0` (when pre-1990, `EQ IS NULL`, `RBC1AAJ >= 8%`, or post-2020 `RBC1AAJ > 0`) to `NULL`, while preserving true distress zeros (`EQ < 0`).
-4. **Cumulative YTD Income Flows (`dq_ytd_monotonicity.csv`):**  
-   All 7 income/expense flow items are reported cumulatively YTD: raw median **`INTINC / ASSET`** doubles/triples/quadruples across **Q1 (`0.0177`) $\rightarrow$ Q2 (`0.0352`) $\rightarrow$ Q3 (`0.0526`) $\rightarrow$ Q4 (`0.0689`)** while annualized **`ROA`** stays flat (`0.971%`, `0.989%`, `0.993%`, `0.944%`). `src/bfews/panel.py` de-cumulates flows strictly across consecutive same-year quarters (`ytd_prev_ok()`).
-5. **Negative Stock Anomalies, Accounting Identities & Insolvency Inversion:**  
-   * **Negative Balance Anomalies:** `ORE < 0` (`646` rows), `SC < 0` (`96`), `LNATRES < 0` (`9`), `NCLNLS < 0` (`3`), `CHBAL < 0` (`2`); sanitized to `NULL` prior to ratio construction in `features.py`. We also flag `LNLSGR > ASSET` (`761` rows) and `NAASSET > NCLNLS + ORE` (`6,236` rows).
-   * **Negative Equity (`EQ < 0`):** `15,659` rows (`0.931%`, with `6,204` `DEP > ASSET` rows) invert naive Texas ratios; we cap `texas_ratio` at `10.0` for non-positive denominators and clip extremes via in-fold `RobustWinsorizer(0.01, 0.99)`.
+![Structural missingness of core Call Report fields across regulatory eras (1984–2026).](../outputs/figures/missingness_by_era.png)
 
-### 3.2 Point-in-Time Exit Classification & `CHANGEC1` Audit (Failures vs. Mergers)
-Every bank (`24,064` `CERT`s) is classified (`outputs/tables/bank_exit_summary.csv`) and audited against FDIC `CHANGEC1` closure codes (`outputs/tables/exit_changec1_codes.csv`):
+Third, capital ratios exhibit two distinct zero-as-missing regimes (`outputs/tables/dq_zero_as_missing.csv`). Prior to the Basel I phase-in (1984–1989), total risk-based capital (RBCRWAJ) is coded as zero in 100.0% of rows and Tier 1 leverage (RBC1AAJ) is coded as zero in 18.13% of rows; after 1989, zero RBC1AAJ appears in 3,458 rows, of which 3,369 have null equity. Even more critically for modern supervision, zero-coded RBCRWAJ jumps from 0.22%–0.31% during 1990–2019 to 37.15% (45,865 of 123,461 rows) during 2020–2026, with 45,423 of those rows (36.79%) simultaneously reporting healthy positive Tier 1 leverage. Since 2020, qualifying community banks opting into the Community Bank Leverage Ratio (CBLR) framework are legally exempt from risk-weighted asset schedules; per the FDIC RISView API specification (`risview_properties.yaml`, `x-source-mapping`), API-derived percentage ratios default to literal zero rather than null whenever denominators are null, non-positive, or exempt. Left untreated, a tree model misclassifies over one-third of healthy modern banks as capital-depleted. Our feature pipeline (`src/bfews/features.py`) therefore recodes RBC1AAJ zeros (when pre-1990 or equity is null) and RBCRWAJ zeros (when pre-1990, equity is null, RBC1AAJ is at least 8%, or post-2020 with positive RBC1AAJ) to null while preserving genuine insolvency zeros where equity is negative.
 
-| Terminal Exit Status | Distinct Banks (`CERT`) | Share of Banks | Panel Rows (`Bank-Quarters`) | FDIC `CHANGEC1` Codes & Label Treatment ($y_{i,q}$) |
+Fourth, all seven income and expense flow variables are reported cumulatively year-to-date (`outputs/tables/dq_ytd_monotonicity.csv`). Raw median interest income scaled by assets rises nearly fourfold across fiscal quarters—from 0.0177 in Q1 to 0.0352 in Q2, 0.0526 in Q3, and 0.0689 in Q4—whereas annualized ROA remains flat across quarters (0.971%, 0.989%, 0.993%, and 0.944%). Our Silver panel builder (`src/bfews/panel.py`) de-cumulates flows strictly across consecutive same-year filings via a guarded quarter-continuity check (`ytd_prev_ok`).
+
+Fifth and sixth, raw balance sheets contain both negative stock anomalies and negative-equity denominator inversions. Specifically, we observe negative balances in ORE (646 rows), securities SC (96 rows), loan-loss allowances LNATRES (9 rows), noncurrent loans NCLNLS (3 rows), and cash balances CHBAL (2 rows), alongside 761 rows with gross loans exceeding total assets and 6,236 rows where NAASSET exceeds NCLNLS plus ORE. Negative stock balances are sanitized to null prior to ratio construction. Separately, negative equity occurs in 15,659 rows (0.931%, accompanied by 6,204 rows where deposits exceed assets); because negative equity inverts a naive Texas Ratio into a misleading negative number, we cap the Texas Ratio at 10.0 whenever the denominator is non-positive and bound continuous extremes via strictly in-fold winsorization.
+
+### 3.2 Point-in-Time Exit Classification and Publication Lag Gate
+
+Every distinct bank in the 42-year panel (24,064 CERTs) is assigned a terminal exit state and reconciled against FDIC CHANGEC1 closure codes in Table 4. Unassisted mergers and voluntary liquidations (16,892 banks, 70.20%) are treated as right-censored non-failures ($y_{i,q}=0$), while FDIC receiverships and open-bank assistance transactions (2,859 banks matched to the financial panel, 11.88%) define the forward failure outcome $y_{i,q}=1$ whenever failure occurs within the subsequent four quarters, $(q, q+4]$.
+
+**Table 4.** Point-in-time bank exit taxonomy and FDIC CHANGEC1 resolution code reconciliation.
+
+| Terminal Exit Status | Distinct Banks | Bank Share | Panel Rows | FDIC CHANGEC1 Codes and Label Treatment |
 | :--- | :---: | :---: | :---: | :--- |
-| **`MERGED_OR_OTHER`** | `16,892` | `70.20%` | `923,166` | Unassisted mergers/voluntary (`223`: `14,183`, `221`: `808`, `240`: `504`); **right-censored ($y=0$)** |
-| **`ACTIVE` (in 2026)** | `4,313` | `17.92%` | `671,777` | Active survivors ($y_{i,q} = 0$) |
-| **`FAILED` (FDIC Resolution)** | `2,859` | `11.88%` | `87,673` | Whole failures/assisted/payoffs (`211`: `2,393`, `213`: `337`, `230`: `191`); $y=1$ in `(q, q+4Q]` |
-| **Total Panel** | **`24,064`** | **`100.00%`** | **`1,682,616`** | *Caveat:* `institutions.parquet` holds current snapshots, never used as historical features |
+| MERGED\_OR\_OTHER | 16,892 | 70.20% | 923,166 | Unassisted mergers and voluntary exits (223: 14,183; 221: 808; 240: 504); right-censored ($y_{i,q}=0$) |
+| ACTIVE (in 2026) | 4,313 | 17.92% | 671,777 | Active surviving institutions ($y_{i,q}=0$) |
+| FAILED (FDIC Resolution) | 2,859 | 11.88% | 87,673 | Failures, assisted mergers, and payoffs (211: 2,393; 213: 337; 230: 191); $y_{i,q}=1$ in $(q, q+4]$ |
+| **Total Panel** | **24,064** | **100.00%** | **1,682,616** | Institutions snapshot used solely for terminal audit, never as historical predictors |
 
-**Post-Failure Filings, Multi-Event `CERT`s & Point-in-Time Publication Lag Gate:** Across the `4,117` raw resolution records (`3,524` `FAILURE`, `593` `ASSISTANCE`), **`44` `CERT`s** appear more than once (`37` `ASSISTANCE+FAILURE`, `4` `ASSISTANCE+ASSISTANCE`, `3` `FAILURE+FAILURE`); `failures_by_cert()` retains each bank's **earliest** event, and `labels.py` drops **`5,636` post-event rows** (`0.335%` across `471` banks: `4,428` following `ASSISTANCE` and `1,208` on/after formal `FAILURE`) where `REPDTE >= FAILDATE`, leaving `1,676,980` pre-event Gold rows (`0` post-failure rows). Moreover, Call Reports release ~60 days post-quarter-end (`available_date = REPDTE + 60 days`): among failed banks, **59.1%** failed within 60 days of their final filing (`median = 49` days); those quarters are flagged `pit_scorable = False` and excluded from training and evaluation.
+*Note(s):* Counts reconcile `outputs/tables/bank_exit_summary.csv` and `outputs/tables/exit_changec1_codes.csv`.
+
+Two additional point-in-time safeguards eliminate subtle survival and timing leakage. First, across the 4,117 raw resolution records (3,524 formal failures and 593 assistance transactions), 44 CERTs appear multiple times (37 assistance-then-failure, 4 repeated assistance, and 3 repeated failure). Retaining each bank's earliest resolution date and removing all filings with $\text{REPDTE} \ge \text{FAILDATE}$ drops 5,636 post-event rows (0.335% across 471 banks: 4,428 following assistance and 1,208 on or after formal closure), leaving 1,676,980 strictly pre-event Gold observations. Second, Call Reports become publicly available approximately 60 days after quarter-end ($\text{available\_date} = \text{REPDTE} + 60\text{ days}$). Among failed banks, 59.1% failed within 60 days of their last filed quarter (median gap of 49 days); those filings could not have informed an ex-ante supervisory decision and are marked non-scorable (`pit_scorable = False`), excluding them from both model fitting and performance evaluation.
 
 ---
 
-## 4. Part 3: Scalable Processing — Polars vs. Pandas vs. PySpark [25 pts]
+## 4. Scalable Processing: Polars, Pandas, and PySpark (Part 3)
 
-### 4.1 How Polars Executes & Optimizes the Core Pipeline
-In `scripts/05_benchmark.py`, we contrast a naive unprojected scan against our optimized pipeline (`outputs/tables/polars_naive_vs_optimized_plan.txt`):
-* **Partition Pruning & Projection Pushdown:** The naive pipeline emits `PROJECT */34 COLUMNS` across all `43` annual files (`1,717,675` estimated rows) and sorts before filtering. The optimized plan pushes `YEAR >= 2008` down into `Parquet SCAN` (skipping 24 folders, scanning **`758,974` rows**) and `PROJECT 9/34 COLUMNS`.
-* **Common Subexpression Elimination (CSE) & Parallel Arrow Windows:** Polars automatically extracts `EQ + LNATRES` once as a CSE node and evaluates `(CERT, YEAR)` / `(CERT)` window partitions across Rust threads (`POLARS_MAX_THREADS=4`).
+### 4.1 Query Optimization in Polars
+
+Comparing a naive unprojected pipeline against our optimized lazy execution plan (`scripts/05_benchmark.py`; `outputs/tables/polars_naive_vs_optimized_plan.txt`) highlights two primary sources of speed and memory efficiency. First, partition pruning and projection pushdown eliminate wasted I/O: the naive plan reads all 34 columns across all 43 annual partitions (1,717,675 estimated rows) and sorts before filtering, whereas the optimized plan pushes the temporal filter ($\text{YEAR} \ge 2008$) directly into the Parquet scanner—skipping 24 annual directories and reading only 758,974 rows across 9 projected columns. Second, Polars performs automatic common subexpression elimination (extracting $\text{EQ} + \text{LNATRES}$ once) and evaluates (CERT, YEAR) and (CERT) window operators in parallel across Arrow buffers using 4 Rust worker threads.
 
 <!-- SYNC:START:REPORT_PART3_SECTION -->
-### 4.2 Multi-Scale Benchmark (`1x–8x`, Up to `13.46M` Rows) vs. Pandas & PySpark
-Tested on a Linux workstation (**`6` physical / `12` logical CPUs**, **`15.34 GB` RAM**, Polars `2.1.0` capped at `POLARS_MAX_THREADS=4`, pandas `3.1.1`; `outputs/tables/benchmark_environment.json`), we avoid unreliable extrapolation from `<1.7M` sub-slices by generating disjoint replicated panels up to **`8x` (`13,460,928` rows)** in isolated `spawn` subprocesses (`outputs/tables/part3_benchmark_results.csv`, `spark_scaling_results.csv`). For a fair equal-core comparison against 4-thread Polars, PySpark is benchmarked at **`local[4]`** alongside the **`local[2]`** laptop-memory baseline:
+### 4.2 Multi-Scale Benchmark (1x–8x, Up to 13.46 Million Rows)
 
-| Scale (`Rows`) | Polars (Streaming, 4t) Time / RSS | Polars (Lazy, 4t) Time / RSS | Polars (Eager, 4t) Time / RSS | Pandas + Pushdown Time / RSS | PySpark `local[4]` (4t) Time / Tree RSS *(vs `local[2]`)* |
+To avoid unreliable linear extrapolation from sub-1.7-million-row slices, we benchmark Polars, Pandas, and PySpark on disjoint replicated panels scaled from 1x (1.68 million rows) up to 8x (13,460,928 rows) inside isolated `spawn` subprocesses on a Linux workstation equipped with 6 physical (12 logical) CPUs and 15.34 GB RAM (Polars 2.1.0 capped at 4 threads; pandas 3.1.1). For an equal-core comparison against 4-thread Polars, PySpark is benchmarked at `local[4]` alongside the 2-thread `local[2]` laptop-memory baseline.
+
+**Table 5.** Multi-scale processing runtime and peak memory benchmark across Polars, Pandas, and PySpark (1x–8x).
+
+| Scale (Rows) | Polars Streaming (4t) | Polars Lazy (4t) | Polars Eager (4t) | Pandas + Pushdown | PySpark `local[4]` (4t) *(vs. `local[2]`)* |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **`1x` (`1.68M`)** | **`0.619 s`** / `1,268 MB` | `1.326 s` / `777 MB` | `1.281 s` / **`711 MB`** | **`0.482 s`** / `1,044 MB` *(naive `0.671 s` / `1,940 MB`)* | `10.551 s` (`4.149 s` JVM) / `1,262.9 MB` *(`local[2]`: `10.617 s` / `1,143.2 MB`)* |
-| **`2x` (`3.37M`)** | **`1.284 s`** / `1,532 MB` | `2.665 s` / `1,072 MB` | `2.656 s` / `1,029 MB` | **`0.882 s`** / `1,544 MB` | — |
-| **`4x` (`6.73M`)** | **`2.173 s`** / **`1,734 MB`** | `5.454 s` / `1,613 MB` | `5.254 s` / `1,710 MB` | **`1.701 s`** / **`2,689 MB`** | `15.182 s` (`11.117 s` compute) / `1,807.8 MB` *(`local[2]`: `16.163 s` / `1,770.3 MB`)* |
-| **`8x` (`13.46M`)** | **`4.271 s`** / `2,499 MB` | `10.406 s` / **`2,569 MB`** | *(skipped OOM risk)* | *(skipped vs eager overhead)* | — |
+| 1x (1.68M) | 0.619 s / 1,268 MB | 1.326 s / 777 MB | 1.281 s / 711 MB | 0.482 s / 1,044 MB *(naive: 0.671 s / 1,940 MB)* | 10.551 s (4.149 s JVM) / 1,262.9 MB *(`local[2]`: 10.617 s / 1,143.2 MB)* |
+| 2x (3.37M) | 1.284 s / 1,532 MB | 2.665 s / 1,072 MB | 2.656 s / 1,029 MB | 0.882 s / 1,544 MB | — |
+| 4x (6.73M) | **2.173 s / 1,734 MB** | 5.454 s / 1,613 MB | 5.254 s / 1,710 MB | 1.701 s / 2,689 MB | 15.182 s (11.117 s compute) / 1,807.8 MB *(`local[2]`: 16.163 s / 1,770.3 MB)* |
+| 8x (13.46M) | **4.271 s / 2,499 MB** | 10.406 s / 2,569 MB | *(skipped OOM risk)* | *(skipped eager overhead)* | — |
 
-*Numeric parity across all Polars, pandas, and PySpark runs:* max relative checksum difference $\le 4.9 \times 10^{-16}$. Measuring across `1x–8x` (`13.46M` rows) reveals why scaling matters (`outputs/tables/part3_capacity_extrapolation.json`): **Polars Streaming** grows memory at just **`101.0 MB / million rows`** (`~151.1M`-row ceiling in `16 GB` RAM; `0.305 s / M rows`), whereas **Pandas + pushdown** grows at **`327.9 MB / million rows`** (`3.25x` steeper RAM slope, exhausting `16 GB` by **`48.5M` rows**). At `4x` (`6.73M`), `pandas + pushdown` is fast on pre-sorted 8-column slices (`1.701 s`), but already consumes `55%` more RAM than Polars (`2,689 MB` vs `1,734 MB`).
+*Note(s):* Cells report wall-clock runtime / peak RSS (Python+JVM process-tree RSS for PySpark). Maximum relative checksum difference across all Polars, Pandas, and PySpark runs is $\le 4.9 \times 10^{-16}$. Sources: `outputs/tables/part3_benchmark_results.csv`, `spark_scaling_results.csv`, and `benchmark_environment.json`.
 
-![Multi-Scale Processing Time and Peak RSS Scaling (1x–8x)](../outputs/figures/part3_scaling_benchmark.png)
+Measuring across 1x–8x exposes the structural memory advantage of streaming columnar execution (`outputs/tables/part3_capacity_extrapolation.json`). Polars Streaming grows peak memory at only 101.0 MB per million rows (0.305 s per million rows, implying a 151.1-million-row capacity ceiling inside 16 GB RAM), whereas Pandas with column pushdown grows at 327.9 MB per million rows—a 3.25x steeper memory slope that exhausts 16 GB RAM by 48.5 million rows. At 4x scale (6.73 million rows), Pandas with pushdown executes quickly on pre-sorted 8-column slices (1.701 s) but already consumes 55% more memory than Polars Streaming (2,689 MB vs. 1,734 MB), as depicted in Figure 3.
 
-### 4.3 PySpark Reproduction, Parity Verification & Cluster Justification
-In `scripts/06_spark.py` (`1.2 GB` driver), Catalyst produces identical numeric outputs across all `43` years (`33,042` sampled rows: `0.0` abs diff; yearly sum diff $7.4 \times 10^{-15}$). Reading `spark_execution_plan.txt` shows two `Exchange` shuffle barriers (`(CERT, YEAR)` followed by coarse `(CERT)` partitioning). Even on an **equal 4-thread footing**, `PySpark local[4]` incurs **`4.065 s` JVM startup** and reaches **`15.182 s`** total (`11.117 s` compute, `1,807.8 MB` Python+JVM tree RSS) at `6.73M` rows vs `2.173 s` in 4-thread Polars Streaming (**7.0x slower** end-to-end; **5.1x slower** compute-only, while `local[2]` takes `16.163 s` / `1,770.3 MB` — confirming JVM startup and shuffle barriers, not thread count, dominate local latency). Hence **a Spark cluster is unwarranted below ~30–50M rows**, becoming essential only when wide schedules or loan-level credit registries overflow laptop RAM.
+![Multi-scale execution time and peak RSS memory scaling across Polars, Pandas, and PySpark (1x–8x).](../outputs/figures/part3_scaling_benchmark.png)
+
+### 4.3 PySpark Reproduction, Parity Verification, and Cluster Justification
+
+In `scripts/06_spark.py` (1.2 GB driver memory), PySpark Catalyst reproduces Polars outputs identically across all 43 annual partitions, achieving a 0.0 maximum absolute difference across 33,042 sampled rows and a $7.4 \times 10^{-15}$ maximum relative difference in yearly aggregate checksums (`outputs/tables/spark_polars_parity.json`). Inspecting the Catalyst physical plan (`outputs/tables/spark_execution_plan.txt`) reveals two full `Exchange` shuffle barriers—first partitioning by (CERT, YEAR) for YTD de-cumulation, then repartitioning by (CERT) for 4-quarter lags. Even on an equal 4-thread footing, PySpark `local[4]` incurs 4.065 s of JVM startup overhead and requires 15.182 s total (11.117 s compute, 1,807.8 MB Python+JVM tree RSS) at 6.73 million rows compared with 2.173 s in 4-thread Polars Streaming—7.0x slower end-to-end and 5.1x slower compute-only, while `local[2]` requires 16.163 s and 1,770.3 MB tree RSS. These measurements confirm that JVM initialization and shuffle barriers, rather than thread count, dominate local Spark latency. Consequently, a distributed Spark cluster is unwarranted for quarterly bank-level Call Reports below 30–50 million rows and becomes justified only when wide multi-schedule expansions or borrower-level credit registries overflow single-node RAM.
 <!-- SYNC:END:REPORT_PART3_SECTION -->
 
 ---
 
-## 5. Part 4: Leak-Free CAMELS Feature Pipeline [15 pts]
+## 5. Leak-Free CAMELS Feature Engineering (Part 4)
 
-### 5.1 Feature Design Motivated by Banking Supervision Theory
-We engineer **26 point-in-time features** (`src/bfews/features.py`) covering all six **CAMELS** pillars plus 4-quarter balance-sheet and asset-quality dynamics, incorporating our CBLR zero-as-missing fix (`rbcrwaj_clean`) and negative stock sanitization (`ORE`, `SC`, `CHBAL`, `NCLNLS`, `LNATRES`, `NAASSET`):
+### 5.1 Supervisory Feature Design
 
-| Category | Features (Point-in-Time at Quarter $q$) | Economic & Supervisory Rationale |
+Guided by the U.S. Uniform Financial Institutions Rating System (CAMELS) and bank-failure econometrics (Wheelock & Wilson, 2000; Cole & White, 2012), we construct 26 strictly point-in-time features (`src/bfews/features.py`) covering capital adequacy, asset quality, management efficiency, earnings, liquidity, sectoral sensitivity, institution size, and 4-quarter balance-sheet momentum. Every ratio incorporates the post-2020 CBLR zero-as-missing remediation and negative-stock sanitization documented in Section 3.1. Table 6 summarizes the complete feature inventory.
+
+**Table 6.** Point-in-time CAMELS feature inventory and supervisory rationale (26 features).
+
+| CAMELS Pillar | Features Computed at Quarter $q$ | Economic and Supervisory Rationale |
 | :--- | :--- | :--- |
-| **C — Capital** | `eq_asset_ratio`, `rbc1aaj_clean`, `rbcrwaj_clean`, `cap_distress_flag` ($\text{EQ}<0 \lor \text{EQ/ASSET}<2\%$) | Leverage & Basel capital buffers (CBLR/pre-Basel zeros $\rightarrow$ `NULL`) |
-| **A — Asset Quality** | `nclnls_ratio`, `naasset_ratio`, `ore_ratio`, `lnatres_ratio`, **`texas_ratio`** ($\text{cap}=10.0$) | Bad loan overhang & reserve coverage; insolvent denominators capped at `10.0` |
-| **M — Management** | `efficiency_ratio` ($\text{NONIX}/(\text{INTINC}-\text{EINTEXP}+\text{NONII})$) | Cost discipline vs. revenue generation |
-| **E — Earnings** | `roa_ytd` (`ROA/100`), `nimy_clean` (`NIMY/100`), `provision_asset_ratio`, `netinc_q_asset_ratio` | Annualized margin/ROA paired with de-cumulated quarterly net income & provisions |
-| **L — Liquidity** | `liquid_asset_ratio` (`(CHBAL+SC)/ASSET`), `brokered_dep_ratio`, `loan_to_deposit_ratio` | Liquid asset buffer vs. hot wholesale brokered funding reliance |
-| **S — Sensitivity** | `re_loan_share`, `ci_loan_share`, `con_loan_share` | Sectoral real-estate, commercial, and consumer credit concentration |
-| **Size & Dynamics** | `log_asset`, `asset_growth_4q`, `loan_growth_4q`, `d4_texas_ratio`, `d4_nclnls_ratio`, `d4_eq_ratio` | 4-quarter guarded shifts/growth (`lag4_ok()` prevents crossing reporting gaps) |
+| Capital (C) | `eq_asset_ratio`, `rbc1aaj_clean`, `rbcrwaj_clean`, `cap_distress_flag` ($\text{EQ}<0 \lor \text{EQ/ASSET}<2\%$) | Leverage and Basel capital buffers after recoding CBLR and pre-Basel zeros to null |
+| Asset Quality (A) | `nclnls_ratio`, `naasset_ratio`, `ore_ratio`, `lnatres_ratio`, `texas_ratio` (capped at 10.0) | Nonperforming loan overhang and reserve coverage; non-positive equity denominators capped |
+| Management (M) | `efficiency_ratio` ($\text{NONIX}/(\text{INTINC}-\text{EINTEXP}+\text{NONII})$) | Operating cost discipline relative to net operating revenue |
+| Earnings (E) | `roa_ytd`, `nimy_clean`, `provision_asset_ratio`, `netinc_q_asset_ratio` | Annualized ROA and net interest margin paired with de-cumulated quarterly income and provisions |
+| Liquidity (L) | `liquid_asset_ratio`, `brokered_dep_ratio`, `loan_to_deposit_ratio` | Liquid cash-and-securities cushion versus wholesale brokered funding reliance |
+| Sensitivity (S) | `re_loan_share`, `ci_loan_share`, `con_loan_share` | Sectoral real-estate, commercial-and-industrial, and consumer credit concentration |
+| Size and Dynamics | `log_asset`, `asset_growth_4q`, `loan_growth_4q`, `d4_texas_ratio`, `d4_nclnls_ratio`, `d4_eq_ratio` | Institution scale and guarded 4-quarter changes (`lag4_ok` prevents crossing reporting gaps) |
 
-### 5.2 Empirical Anti-Leakage Verification (`leak_parameter_shift.csv`)
-All lags (`shift(1)`/`shift(4)`) and ratios use strictly rows `<= REPDTE`, excluding ex-post exit columns (`ACTIVE`, `CHANGEC1`, `FAILDATE`, `COST`). Inside each walk-forward fold, **`RobustWinsorizer(0.01, 0.99)`** $\rightarrow$ **`SimpleImputer(median, add_indicator=True)`** $\rightarrow$ **`StandardScaler`** $\rightarrow$ **`PriorOddsCalibrator`** (Elkan, 2001) fit **exclusively on `X_train`, `y_train`**. Fitting preprocessors naively on full `DEV+TEST` would leak secular trends, shifting upper 99th-percentile clips by **`20.95%` (`brokered_dep_ratio`)**, **`16.19%` (`eq_asset_ratio`)**, **`16.00%` (`loan_growth_4q`)**, and medians by **`43.04%` (`d4_texas_ratio`)** and **`23.48%` (`con_loan_share`)**. Automated unit tests verify causal truncation invariance (`test_leak_free_property`), walk-forward fold purges (`test_cv_folds_strictly_purged`), and bit-exact preprocessor invariance even when `TEST` features are corrupted with `1e9` (`test_preprocessor_invariant_to_test_corruption`).
+*Note(s):* All 26 features are computed exclusively from filings at or before quarter $q$ (`<= REPDTE`) in `src/bfews/features.py`.
+
+### 5.2 Empirical Anti-Leakage Verification
+
+Every panel lag and financial ratio uses strictly historical rows at or before the reporting quarter, and all ex-post exit metadata (ACTIVE, CHANGEC1, FAILDATE, COST) are structurally excluded via an explicit forbidden-column list. Within each walk-forward training fold, the scikit-learn preprocessing chain—RobustWinsorizer (1st–99th percentiles), median SimpleImputer with missingness indicators, StandardScaler, and the Elkan (2001) PriorOddsCalibrator—is fitted exclusively on training rows.
+
+Fitting preprocessors naively across the combined development and test panel introduces severe secular look-ahead distortion (`outputs/tables/leak_parameter_shift.csv`), shifting 99th-percentile winsorization bounds by 20.95% for `brokered_dep_ratio`, 16.19% for `eq_asset_ratio`, and 16.00% for `loan_growth_4q`, while shifting imputation medians by 43.04% for `d4_texas_ratio` and 23.48% for `con_loan_share`. Automated pytest suites (`tests/test_pipeline.py`) verify causal truncation invariance, strict inter-fold purge gaps, and bit-exact preprocessor invariance even when held-out test features are artificially corrupted with values of $10^9$.
 
 ---
 
-## 6. Part 5: Modelling, Validation & Cost-Sensitive Thresholding [15 pts]
+## 6. Modelling, Temporal Validation, and Cost-Sensitive Thresholding (Part 5)
 
-### 6.1 Split Design & Walk-Forward Validation Scheme
-We implement a two-level temporal validation design (`config.yaml`, `src/bfews/modeling.py`):
-* **`DEV` (`1984Q1–2007Q4`):** `1,223,542` pit-scorable rows across **`2,661` total pit-scorable failing banks** (`8,844` pre-failure quarters). All model selection, feature engineering, and threshold calibration occur exclusively within `DEV`.
-* **Expanding-Window Walk-Forward CV Inside `DEV`:** We evaluate 5 chronological out-of-time validation blocks (`1988`, `1990`, `1992`, `1994–1999`, `2000–2007`), each preceded by a 1-year purge buffer (`4` quarters) between training and validation. Pooled across the 5 validation blocks, the out-of-fold (`OOF`) evaluation set comprises **`760,559` bank-quarters** (`3,547` positive pre-failure quarters) and **`1,522` failing banks** (the remaining `1,139` `DEV` failures occurred in the initial `1984–1987` warm-up window or inside the 1-year inter-fold purge years `1989`, `1991`, `1993`).
-* **`PURGE` (`2008Q1–2008Q4`):** `33,922` pit-scorable rows. Dropping all `2008` filings guarantees **zero 4-quarter forward label overlap** before testing begins in `2009Q1`.
-* **`TEST` (`2009Q1–2025Q2`):** `400,332` pit-scorable rows (`485` failing banks, `1,409` pre-failure quarters). No hyperparameters, feature lists, or threshold rules were tuned on `TEST`; the full DEV-only specification (splits, 26 features, `FORBIDDEN_FEATURE_COLS`, champion rule, cost parameters, and $\theta^* = 0.0039$) is recorded as an auditable manifest in `outputs/tables/frozen_protocol.json` (SHA-256 fingerprints of the DEV-only spec and of `test_results.json`, verified by `pytest`; the manifest documents configuration integrity rather than proving pre-registration, while single-test discipline rests on DEV-only selection code and the automated leakage tests). Software fixes in probability calibration (`PriorOddsCalibrator`) and `TexasRatioBaseline` were re-executed with `TEST` held strictly as a passive reporting partition.
+### 6.1 Temporal Split Protocol and Walk-Forward Validation
 
-### 6.2 Model Comparison (Walk-Forward CV, Label Sensitivity & Spark MLlib Demo)
+We enforce a two-level temporal validation protocol (`config.yaml` and `src/bfews/modeling.py`) designed to mirror real-time supervisory deployment across distinct macroeconomic regimes. First, the development partition (DEV, 1984Q1–2007Q4) comprises 1,223,542 pit-scorable rows across 2,661 failing banks (8,844 pre-failure quarters), encompassing the 1984–1993 savings-and-loan and commercial banking crisis. All architecture selection, hyperparameter choices, and threshold calibration occur exclusively within DEV via five expanding-window out-of-time validation blocks (1988, 1990, 1992, 1994–1999, and 2000–2007), each preceded by a 4-quarter purge buffer between training and validation. Pooled across the five validation blocks, the out-of-fold (OOF) set contains 760,559 bank-quarters (3,547 positive quarters) and 1,522 failing banks; the remaining 1,139 DEV failures occur in the initial 1984–1987 warm-up window or inside the 1-year inter-fold purge years (1989, 1991, and 1993).
+
+Second, a full 4-quarter embargo (PURGE, 2008Q1–2008Q4, 33,922 pit-scorable rows) separates DEV from the held-out test partition (TEST, 2009Q1–2025Q2, 400,332 pit-scorable rows, 485 failing banks, 1,409 pre-failure quarters), guaranteeing zero 4-quarter forward label overlap across the split boundary. No hyperparameters, feature subsets, or threshold rules are tuned on TEST. The complete DEV-only specification—splits, 26 features, forbidden columns, champion selection rule, cost parameters, and $\theta^* = 0.0039$—is logged as an auditable configuration-integrity manifest in `outputs/tables/frozen_protocol.json` (SHA-256 fingerprints of the DEV specification and `test_results.json`, verified by pytest; the manifest documents configuration integrity rather than proving pre-registration, while single-test discipline rests on DEV-only selection code and automated leakage tests).
+
+### 6.2 Model Comparison, Label Sensitivity, and PySpark MLlib Check
+
+Table 7 reports pooled out-of-fold walk-forward validation metrics across four progressively richer model specifications inside DEV. Non-linear HistGradientBoosting over all 26 CAMELS features dominates every alternative on discrimination and probability calibration, raising OOF PR-AUC to 0.4624 (versus 0.2642 for the univariate Texas Ratio rule and 0.4015 for 3-variable logistic regression) while lowering the Brier score to 0.00337.
+
+**Table 7.** Out-of-fold walk-forward validation performance across candidate model architectures (DEV, 1984Q1–2007Q4).
 
 | Model Architecture | Features Used | OOF PR-AUC | OOF ROC-AUC | Recall @ Top 1% | Recall @ Top 5% | Brier Score |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **`Texas ratio rule`** | `1` (`texas_ratio` rank) | `0.2642` | `0.9734` | `0.6665` | `0.9290` | `0.00724` |
-| **`Logistic, 3 variables`** | `3` (`eq_asset_ratio`, `nclnls_ratio`, `roa_ytd`) | `0.4015` | `0.9786` | `0.7277` | `0.9566` | `0.00368` |
-| **`Logistic, 26 CAMELS`** | All `26` CAMELS + Indicators (L2, $C=0.1$) | `0.3601` | `0.9784` | `0.7291` | `0.9352` | `0.00393` |
-| **`HistGradientBoosting, 26 CAMELS` (Champion)** | All `26` CAMELS (`max_depth=5`, `lr=0.05`) | **`0.4624`** | **`0.9851`** | **`0.7753`** | **`0.9504`** | **`0.00337`** |
+| Texas ratio rule | 1 (Texas Ratio rank) | 0.2642 | 0.9734 | 0.6665 | 0.9290 | 0.00724 |
+| Logistic, 3 variables | 3 (equity, NCLNLS, ROA) | 0.4015 | 0.9786 | 0.7277 | 0.9566 | 0.00368 |
+| Logistic, 26 CAMELS | 26 CAMELS + indicators (L2, $C=0.1$) | 0.3601 | 0.9784 | 0.7291 | 0.9352 | 0.00393 |
+| **HistGradientBoosting, 26 CAMELS** | **26 CAMELS (max\_depth=5, lr=0.05)** | **0.4624** | **0.9851** | **0.7753** | **0.9504** | **0.00337** |
 
-* **`DEV` Label Sensitivity (`FAILURE + ASSISTANCE` vs. `FAILURE` only, `dev_label_sensitivity.csv`):** Restricting positive labels inside `DEV` exclusively to formal closures (`1,361` OOF failing banks vs. `1,522`) yields OOF PR-AUC `0.3878` and ROC-AUC `0.9794` (`Brier 0.00334`), confirming ranking stability while preserving FDIC's supervisory event definition (`TEST` `2009–2025` contains `0` `ASSISTANCE` rows).
-* **PySpark MLlib Demonstration (`src/bfews/spark_jobs.py`):** On the development split, PySpark MLlib Logistic Regression achieves validation **ROC-AUC = `0.9388`** and **PR-AUC = `0.1893`**, matching scikit-learn (`0.9394` ROC-AUC, `0.1896` PR-AUC).
+*Note(s):* Metrics are evaluated on pooled out-of-fold predictions across 5 purged walk-forward blocks (760,559 bank-quarters; 1,522 failing banks). Source: `outputs/tables/cv_model_comparison.csv`.
 
-![TEST Precision-Recall Curves & DEV Cost Optimization U-Curve](../outputs/figures/pr_and_cost_curves.png)
+Two auxiliary checks within DEV confirm robustness. First, restricting positive labels in DEV strictly to formal closures (excluding open-bank assistance transactions, reducing OOF failures from 1,522 to 1,361) yields an OOF PR-AUC of 0.3878, ROC-AUC of 0.9794, and Brier score of 0.00334 (`outputs/tables/dev_label_sensitivity.csv`), confirming ranking stability while preserving the standard FDIC supervisory event definition (the 2009–2025 test set contains zero assistance transactions). Second, a PySpark MLlib logistic regression demonstration (`src/bfews/spark_jobs.py`) achieves a development validation ROC-AUC of 0.9388 and PR-AUC of 0.1893, closely matching scikit-learn (0.9394 ROC-AUC and 0.1896 PR-AUC). Figure 4 contrasts the resulting held-out precision-recall curves against the DEV expected-cost optimization curve.
 
-### 6.3 Dual Supervisory Operating Regimes: Capacity Budgets & Calibrated Cost Threshold ($\theta^*$)
-In real central-bank supervision, early-warning scores are deployed under two complementary operating regimes:
-1. **Fixed Quarterly Supervisory Capacity Budgets (`Top 1%`, `Top 2%`, `Top 5%` per quarter):** Examination departments have a fixed roster of on-site examiners each quarter and inspect the top $k\%$ highest-risk institutions per quarter.
-2. **Expected-Cost Minimizing Probability Threshold ($\theta^*$):** Using prior-odds calibrated probabilities on the `760,559` `DEV` OOF rows (`1,522` failing banks), we minimize total supervisory loss over a 300-point log-spaced threshold grid $\theta \in [10^{-4}, 0.90]$:
-   $$\mathcal{L}(\theta) = \sum_{b \in \text{FN}(\theta)} \ell_{\text{DIF}} \cdot \min(\text{ASSET}_b,\, A_{0.85}) \;+\; C_{\text{FP}} \cdot \text{FP}_{\text{episodes}}(\theta)$$
-   with empirical DIF loss rate $\ell_{\text{DIF}} = 0.1961$, community/regional asset cap $A_{0.85} = \$474,926\text{k}$, and episode-based false-alarm cost ($C_{\text{FP}} = \$250\text{k}$). The unique interior cost minimum on `DEV` OOF occurs at **$\theta^* = 0.0039$** (`theta_at_grid_edge = False`, `expected_cost_dev_kusd = 5,418,988` kUSD), capturing **`1,434 / 1,522` failing banks** (`88` missed, `8,083` episodes) and cutting expected supervisory loss by **`88.56%`** relative to a No-Alarm policy (`$47,352.9M`) and **`86.61%`** relative to a naive $\tau \approx 0.50$ cutoff (`$40,460.8M`, only `14.55%` saving under `0.47%` base-rate imbalance; `outputs/tables/frozen_protocol.json`).
-   * **Data-Driven Cost-Ratio & Stability Bound (`outputs/tables/cfp_stability_interval.json`):** Because $\mathcal{L}(\theta; C_{\text{FP}}) = M(\theta) + C_{\text{FP}} \cdot E(\theta)$ is linear in $C_{\text{FP}}$, decomposing the saved `DEV` OOF loss curves separates missed-failure DIF loss $M(\theta)$ from false-alarm episodes $E(\theta)$ with `0.0` MUSD rounding error and proves that **$\theta^* = 0.0039$ remains strictly optimal across the entire `2.25x` interval $C_{\text{FP}} \in [\$231.1\text{k},\, \$519.9\text{k}]$**. Relative to the empirical `DEV` OOF mean DIF loss per failing bank (`$31.11M` across `1,522` failures), this interval corresponds to an implied FN-to-FP cost ratio of **`60x–135x`** (`124.4x` at `$250k`). As an external institutional anchor, the FDIC Division of Risk Management Supervision's 2024 ongoing operating budget (`$703.0M`) over `1,200` Risk Management safety-and-soundness examinations implies a gross upper bound of `$585.9k` per full exam (before netting specialty exams and off-site monitoring; FDIC 2024 Annual Report & Proposed 2025 Budget), placing a targeted off-cycle examination squarely inside `$250k–$500k`—where $\theta^*$ is invariant.
+![Held-out test precision-recall curves (left) and development out-of-fold expected supervisory cost curve (right).](../outputs/figures/pr_and_cost_curves.png)
 
-**Sensitivity of Optimal Threshold $\theta^*$ to False-Alarm Cost $C_{\text{FP}}$ (`outputs/tables/test_results.json`):**
+### 6.3 Dual Supervisory Operating Regimes and Cost-Optimal Thresholding
 
-| False-Alarm Episode Cost ($C_{\text{FP}}$) | Optimal $\theta^*$ (DEV OOF) | Grid Edge? | DEV OOF Banks Missed (`/ 1,522`) | DEV OOF False-Alarm Episodes | TEST Bank Recall (`/ 485`) | TEST Flagged Share of Rows | TEST Median Alerts / Qtr |
+In operational banking supervision, early-warning scores support two complementary triage regimes: fixed quarterly examination capacity budgets (inspecting the highest-risk 1%, 2%, or 5% of institutions each quarter) and an expected-cost minimizing probability threshold ($\theta^*$). Under the cost-sensitive formulation, we minimize expected supervisory loss on the 760,559 DEV out-of-fold rows (1,522 failing banks) over a 300-point log-spaced grid $\theta \in [10^{-4}, 0.90]$:
+
+$$\mathcal{L}(\theta) = \sum_{b \in \text{FN}(\theta)} \ell_{\text{DIF}} \cdot \min(\text{ASSET}_b,\, A_{0.85}) \;+\; C_{\text{FP}} \cdot \text{FP}_{\text{episodes}}(\theta),$$
+
+where $\ell_{\text{DIF}} = 0.1961$ is the empirical Deposit Insurance Fund loss rate estimated from historical failures, $A_{0.85} = \$474,926\text{k}$ is the 85th-percentile community-and-regional bank asset cap, and $C_{\text{FP}} = \$250\text{k}$ is the baseline cost of an unnecessary off-cycle examination episode. The unique interior minimum occurs at $\theta^* = 0.0039$ (expected DEV loss of $5,418,988k), capturing 1,434 of 1,522 DEV OOF failing banks (88 missed, 8,083 false-alarm episodes) and reducing expected supervisory loss by 88.56% relative to a no-alarm policy ($47,352.9M) and 86.61% relative to a naive 0.50 cutoff ($40,460.8M, which saves only 14.55% under 0.47% class imbalance).
+
+Because $\mathcal{L}(\theta; C_{\text{FP}}) = M(\theta) + C_{\text{FP}} \cdot E(\theta)$ is linear in $C_{\text{FP}}$, decomposing the DEV OOF loss curves (`outputs/tables/cfp_stability_interval.json`) separates missed-failure DIF loss $M(\theta)$ from false-alarm episodes $E(\theta)$ with 0.0 MUSD rounding error and proves that $\theta^* = 0.0039$ remains strictly optimal across the entire 2.25x interval $C_{\text{FP}} \in [\$231.1\text{k},\, \$519.9\text{k}]$. Relative to the empirical DEV OOF mean DIF loss per failing bank ($31.11M across 1,522 failures), this stability band corresponds to an implied false-negative to false-positive cost ratio of 60x–135x (124.4x at $250k). As an external institutional anchor, the FDIC Division of Risk Management Supervision's 2024 ongoing operating budget ($703.0M) across 1,200 Risk Management safety-and-soundness examinations implies a gross upper bound of $585.9k per full examination before netting specialty exams and off-site monitoring (FDIC, 2024, 2025), placing a targeted off-cycle review squarely inside the $250k–$500k band where $\theta^*$ is invariant.
+
+**Table 8.** Sensitivity of the DEV-optimal probability threshold to the false-alarm episode cost ($C_{\text{FP}}$).
+
+| False-Alarm Cost ($C_{\text{FP}}$) | Optimal $\theta^*$ (DEV) | Grid Edge? | DEV Missed (/ 1,522) | DEV FP Episodes | TEST Recall (/ 485) | TEST Flagged Rows | TEST Median Alerts / Qtr |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **`$100k`** | `0.0009` | `False` | `48` | `16,815` | `97.32%` | `6.128%` | `139.0` |
-| **`$250k` (Baseline)** | **`0.0039`** | **`False`** | **`88`** | **`8,083`** | **`96.70%`** | **`2.883%`** | **`43.0`** |
-| **`$500k`** | `0.0039` | `False` | `88` | `8,083` | `96.70%` | `2.883%` | `43.0` |
-| **`$1,000k`** | `0.0139` | `False` | `150` | `4,383` | `95.67%` | `1.700%` | `26.5` |
+| $100k | 0.0009 | False | 48 | 16,815 | 97.32% | 6.128% | 139.0 |
+| **$250k (Baseline)** | **0.0039** | **False** | **88** | **8,083** | **96.70%** | **2.883%** | **43.0** |
+| $500k | 0.0039 | False | 88 | 8,083 | 96.70% | 2.883% | 43.0 |
+| $1,000k | 0.0139 | False | 150 | 4,383 | 95.67% | 1.700% | 26.5 |
 
-*Note: Table 6.3 evaluates rounded 4-decimal grid cutoffs ($\theta = 0.0039 \rightarrow 2.883\%$), whereas Table 6.4 evaluates the exact unrounded log-grid point ($\theta^* = 0.003864 \rightarrow 2.894\%$, differing by 43 of 400,332 test rows).*
+*Note(s):* Table 8 evaluates rounded four-decimal grid cutoffs ($\theta = 0.0039 \rightarrow 2.883\%$), whereas Table 10 evaluates the exact unrounded log-grid optimum ($\theta^* = 0.003864 \rightarrow 2.894\%$, differing by 43 of 400,332 test rows). Source: `outputs/tables/test_results.json`.
 
-### 6.4 Evaluation on Held-Out `TEST` (`2009Q1–2025Q2`) & Live `2026Q2` Operational Watchlist
-Scoring the `DEV`-trained Champion `HistGradientBoosting` pipeline on `400,332` held-out test bank-quarters (`485` failing banks, `1,409` pre-failure quarters) yields (`outputs/tables/test_results.json`):
+### 6.4 Held-Out Test Evaluation and Operational 2026Q2 Watchlist
 
-| Evaluation Partition / Model | Sample Rows | Failing Banks | Pre-Fail Quarters | PR-AUC | ROC-AUC | Recall @ Top 1% | Recall @ Top 5% | Brier Score |
+Evaluating the frozen DEV-trained HistGradientBoosting champion once on the 400,332 held-out test bank-quarters (2009Q1–2025Q2; 485 failing banks and 1,409 pre-failure quarters) confirms strong out-of-time generalization. Table 9 compares overall and regime-specific discrimination against the Texas Ratio baseline, while Table 10 and Figure 5 summarize supervisory operating trade-offs across fixed capacity budgets and the cost-optimal threshold.
+
+**Table 9.** Held-out test evaluation and crisis-regime subperiod breakdown (2009Q1–2025Q2).
+
+| Evaluation Partition and Model | Sample Rows | Failing Banks | Pre-Fail Qtrs | PR-AUC | ROC-AUC | Recall @ Top 1% | Recall @ Top 5% | Brier Score |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Test Set — Texas Ratio Baseline** | `400,332` | `485` | `1,409` | `0.1507` | `0.9629` | `0.5877` | `0.9163` | `0.00625` |
-| **Test Set — Champion `HistGradientBoosting`** | **`400,332`** | **`485`** | **`1,409`** | **`0.5478`** | **`0.9854`** | **`0.8353`** | **`0.9560`** | **`0.00238`** |
-| *Subperiod 1: GFC (`2009–2014`)* | `177,923` | `453` | `1,303` | **`0.5847`** | **`0.9881`** | `0.6708` | **`0.9601`** | `0.00481` |
-| *Subperiod 2: Modern & SVB (`2015–2025`)* | `222,409` | `35` | `106` | `0.1708` | **`0.9193`** | **`0.6698`** | `0.7547` | `0.00043` |
+| Test Set — Texas Ratio Baseline | 400,332 | 485 | 1,409 | 0.1507 | 0.9629 | 0.5877 | 0.9163 | 0.00625 |
+| **Test Set — Champion HistGradientBoosting** | **400,332** | **485** | **1,409** | **0.5478** | **0.9854** | **0.8353** | **0.9560** | **0.00238** |
+| Subperiod 1: GFC (2009–2014) | 177,923 | 453 | 1,303 | 0.5847 | 0.9881 | 0.6708 | 0.9601 | 0.00481 |
+| Subperiod 2: Modern and SVB (2015–2025) | 222,409 | 35 | 106 | 0.1708 | 0.9193 | 0.6698 | 0.7547 | 0.00043 |
 
-**Held-Out Test Supervisory Operating Points (Fixed Capacity Budgets vs. Cost Threshold $\theta^* = 0.0039$):**
+*Note(s):* Three banks contribute pre-failure observations spanning the 2014/2015 subperiod boundary, so subperiod failing-bank counts sum to 488 versus 485 unique failing banks overall. Source: `outputs/tables/test_results.json`.
 
-| Supervisory Operating Rule | Flagged Rows | Median Alerts / Qtr | Failing Banks Caught (`/ 485`) | Bank Recall | Row Recall (`/ 1,409`) | Row Precision | False-Alarm Episodes (Rows) | Median Lead (Days) |
+**Table 10.** Held-out test supervisory operating points: fixed quarterly capacity budgets versus the cost-optimal threshold.
+
+| Supervisory Operating Rule | Flagged Rows | Median Alerts / Qtr | Banks Caught (/ 485) | Bank Recall | Row Recall (/ 1,409) | Row Precision | FP Episodes (Rows) | Median Lead (Days) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Capacity Budget: Top 1% / Quarter** | `1.000%` | `58.5` | `399 / 485` | `82.27%` | `59.55%` (`839`) | **`20.95%`** | `1,080` (`3,165`) | `210.0` |
-| **Capacity Budget: Top 2% / Quarter** | `2.000%` | `117.5` | `443 / 485` | `91.34%` | `78.78%` (`1,110`) | `13.86%` | `2,157` (`6,896`) | `286.0` |
-| **Cost-Optimal Threshold ($\theta^* = 0.0039$)** | **`2.894%`** | **`43.0`** | **`469 / 485`** | **`96.70%`** | **`94.39%` (`1,330`)** | **`11.48%`** | **`2,707` (`10,257`)** | **`297.0`** |
-| **Capacity Budget: Top 5% / Quarter** | `5.000%` | `294.0` | `466 / 485` | `96.08%` | `92.62%` (`1,305`) | `6.52%` | `5,601` (`18,713`) | `297.0` |
+| Capacity Budget: Top 1% / Quarter | 1.000% | 58.5 | 399 / 485 | 82.27% | 59.55% (839) | 20.95% | 1,080 (3,165) | 210.0 |
+| Capacity Budget: Top 2% / Quarter | 2.000% | 117.5 | 443 / 485 | 91.34% | 78.78% (1,110) | 13.86% | 2,157 (6,896) | 286.0 |
+| **Cost-Optimal Threshold ($\theta^* = 0.0039$)** | **2.894%** | **43.0** | **469 / 485** | **96.70%** | **94.39% (1,330)** | **11.48%** | **2,707 (10,257)** | **297.0** |
+| Capacity Budget: Top 5% / Quarter | 5.000% | 294.0 | 466 / 485 | 96.08% | 92.62% (1,305) | 6.52% | 5,601 (18,713) | 297.0 |
 
-![Held-Out Test Operating Points & Crisis Regime Subperiods](../outputs/figures/operating_points.png)
+*Note(s):* Dynamic thresholding at $\theta^* = 0.0039$ concentrates inspection workload during crisis peaks (2009–2012) while keeping median quarterly alerts (43.0) below the Top-1% fixed-budget workload (58.5). Source: `outputs/tables/test_results.json`.
 
-![Quarterly Alerts Over Time & Canary Bank Risk Trajectories](../outputs/figures/alarms_and_canary_trajectories.png)
+![Held-out test operating points across capacity budgets and crisis regime subperiods.](../outputs/figures/operating_points.png)
 
-**Operational Unlabelled `2026Q2` Watchlist Demo (`outputs/tables/watchlist_2026q2.csv`):** Scoring the `4,306` active `POST_SAMPLE` banks at `2026-06-30` with the frozen **`DEV`-trained** champion (zero `TEST` reuse; future outcomes unobservable) flags **`26` banks above $\theta^* = 0.0039$** (mean score `0.00054`, max `0.4253`). Top-5 watchlisted names (static metadata from `institutions.parquet`) show elevated Texas Ratios or thin GAAP equity: **1. Tioga-Franklin Savings Bank** (`PA`, `$68.4M`, $\hat{p}=0.4253$, Texas `2.570`, Eq `2.04%`), **2. Lamont Bank of St. John** (`WA`, `$51.1M`, `0.4030`, Texas `5.191`, Eq `1.80%`), **3. Summit National Bank** (`WY`, `$65.9M`, `0.2026`, Eq `2.40%`, Brokered `34.40%`), **4. Columbia Savings and Loan Assn** (`WI`, `$20.6M`, `0.1890`, Texas `2.311`), and **5. Nano Banc** (`CA`, `$736.2M`, `0.1565`, Texas `2.098`, Brokered `22.79%`).
+![Quarterly supervisory alerts over time (left) and risk trajectories for major historical failure cases (right).](../outputs/figures/alarms_and_canary_trajectories.png)
 
-### 6.5 Supervisory Explainability: Top 10 CAMELS Risk Drivers (`DEV` Walk-Forward OOF)
-Computing weighted **permutation importance** ($\Delta\text{PR-AUC}$) on `DEV` folds with `Logistic` coefficients confirms (`outputs/tables/feature_importance.csv`):
+As a live operational demonstration on the right-censored tail (`outputs/tables/watchlist_2026q2.csv`), scoring all 4,306 active banks filing at 2026-06-30 with the frozen DEV-trained champion—without reusing test outcomes—flags 26 institutions above $\theta^* = 0.0039$ (cross-sectional mean predicted probability 0.00054, maximum 0.4253). The five highest-ranked institutions exhibit elevated Texas Ratios, thin GAAP equity, or heavy wholesale brokered funding: Tioga-Franklin Savings Bank (PA, $68.4M assets, $\hat{p}=0.4253$, Texas Ratio 2.570, equity 2.04%), Lamont Bank of St. John (WA, $51.1M, $\hat{p}=0.4030$, Texas Ratio 5.191, equity 1.80%), Summit National Bank (WY, $65.9M, $\hat{p}=0.2026$, equity 2.40%, brokered deposits 34.40%), Columbia Savings and Loan Association (WI, $20.6M, $\hat{p}=0.1890$, Texas Ratio 2.311), and Nano Banc (CA, $736.2M, $\hat{p}=0.1565$, Texas Ratio 2.098, brokered deposits 22.79%).
 
-| Rank | Feature (`CAMELS` Dimension) | HGB Perm. Importance ($\Delta\text{PR-AUC} \pm \text{SD}$) | Logit Std. Coef. ($\hat{\beta}$) | Econometric Direction |
+### 6.5 Supervisory Explainability: Top Ten CAMELS Risk Drivers
+
+To interpret model decisions strictly without touching the held-out test set, we compute weighted permutation importance ($\Delta\text{PR-AUC}$) on DEV walk-forward folds alongside standardized logistic regression coefficients ($\hat{\beta}$). Table 11 and Figure 7 show clear economic alignment: asset-quality overhang (`texas_ratio`, $\Delta\text{PR-AUC} = 0.26242 \pm 0.00804$), rapid four-quarter equity erosion (`d4_eq_ratio`, $0.06486$), and thin book equity (`eq_asset_ratio`, $0.06167$, $\hat{\beta} = -1.1611$) dominate risk rankings, followed by Tier 1 leverage, earnings (`roa_ytd`, `nimy_clean`), wholesale brokered deposit reliance (`brokered_dep_ratio`, $\hat{\beta} = +0.2247$), and real-estate owned overhang (`ore_ratio`).
+
+**Table 11.** Top ten CAMELS risk drivers ranked by strictly-DEV walk-forward permutation importance and standardized logistic coefficients.
+
+| Rank | Feature (CAMELS Dimension) | HGB Perm. Importance ($\Delta\text{PR-AUC} \pm \text{SD}$) | Logit Std. Coef. ($\hat{\beta}$) | Econometric Direction |
 | :---: | :--- | :---: | :---: | :--- |
-| `1` | **`texas_ratio`** (`A - Asset Quality`) | **`0.26242` $\pm$ `0.00804`** | `+0.0606` | `+ Increase Risk` |
-| `2` | **`d4_eq_ratio`** (`Size & Dynamics`) | **`0.06486` $\pm$ `0.00794`** | `-0.1646` | `- Reduce Risk` |
-| `3` | **`eq_asset_ratio`** (`C - Capital`) | **`0.06167` $\pm$ `0.00967`** | `-1.1611` | `- Reduce Risk` |
-| `4` | `rbc1aaj_clean` (`C - Capital`) | `0.02975` $\pm$ `0.00717` | `-0.7788` | `- Reduce Risk` |
-| `5` | `roa_ytd` (`E - Earnings`) | `0.02555` $\pm$ `0.00174` | `-0.0260` | `- Reduce Risk` |
-| `6` | `nimy_clean` (`E - Earnings`) | `0.01491` $\pm$ `0.00173` | `-0.1243` | `- Reduce Risk` |
-| `7` | `brokered_dep_ratio` (`L - Liquidity`) | `0.00825` $\pm$ `0.00145` | `+0.2247` | `+ Increase Risk` |
-| `8` | `ore_ratio` (`A - Asset Quality`) | `0.00646` $\pm$ `0.00215` | `+0.2290` | `+ Increase Risk` |
-| `9` | `naasset_ratio` (`A - Asset Quality`) | `0.00546` $\pm$ `0.00176` | `+0.0979` | `+ Increase Risk` |
-| `10` | `rbcrwaj_clean` (`C - Capital`) | `0.00466` $\pm$ `0.00390` | `-0.0926` | `- Reduce Risk` |
+| 1 | `texas_ratio` (Asset Quality) | 0.26242 $\pm$ 0.00804 | +0.0606 | Increases risk |
+| 2 | `d4_eq_ratio` (Size and Dynamics) | 0.06486 $\pm$ 0.00794 | -0.1646 | Reduces risk |
+| 3 | `eq_asset_ratio` (Capital) | 0.06167 $\pm$ 0.00967 | -1.1611 | Reduces risk |
+| 4 | `rbc1aaj_clean` (Capital) | 0.02975 $\pm$ 0.00717 | -0.7788 | Reduces risk |
+| 5 | `roa_ytd` (Earnings) | 0.02555 $\pm$ 0.00174 | -0.0260 | Reduces risk |
+| 6 | `nimy_clean` (Earnings) | 0.01491 $\pm$ 0.00173 | -0.1243 | Reduces risk |
+| 7 | `brokered_dep_ratio` (Liquidity) | 0.00825 $\pm$ 0.00145 | +0.2247 | Increases risk |
+| 8 | `ore_ratio` (Asset Quality) | 0.00646 $\pm$ 0.00215 | +0.2290 | Increases risk |
+| 9 | `naasset_ratio` (Asset Quality) | 0.00546 $\pm$ 0.00176 | +0.0979 | Increases risk |
+| 10 | `rbcrwaj_clean` (Capital) | 0.00466 $\pm$ 0.00390 | -0.0926 | Reduces risk |
 
-![Top 10 CAMELS Risk Drivers (DEV Walk-Forward Permutation Importance)](../outputs/figures/feature_importance.png)
+*Note(s):* Permutation importance is averaged across DEV walk-forward out-of-fold validation blocks using 5 repeats per block (`outputs/tables/feature_importance.csv`).
 
-### 6.6 Historical "Canary" Case Studies on Major Held-Out `TEST` Failures
-As a purely post-hoc diagnostic on frozen `TEST` scores (`outputs/tables/canary_case_studies.csv`), Table 6.6 inspects the 5 largest FDIC receivership closures (`RESTYPE == FAILURE`) by asset size (`QBFASSET`) in `GFC (2009–2014)` and `Modern (2015–2025)`:
+![Top ten CAMELS risk drivers measured by strictly-DEV walk-forward permutation importance.](../outputs/figures/feature_importance.png)
 
-| Bank Name (`CERT`, State) | Regime / Failure Date | Assets (`$M`) | Peak $\hat{p}$ (`4Q`) | Flagged at $\theta^*$? (`Lead Days`) | Flagged Top 1%? (`Lead Days`) | Peak Texas Ratio / Min Eq% / Max Bro% |
+### 6.6 Post-Hoc Historical Canary Case Studies
+
+As a purely diagnostic post-hoc inspection of frozen test-set scores (`outputs/tables/canary_case_studies.csv`), Table 12 examines the five largest FDIC receivership closures by total assets during the Global Financial Crisis (2009–2014) and the five largest closures during the modern era (2015–2025).
+
+**Table 12.** Post-hoc historical canary diagnostics for the five largest GFC and five largest modern FDIC failures.
+
+| Bank Name (CERT, State) | Regime / Failure Date | Assets ($M) | Peak $\hat{p}$ (4Q) | Flagged at $\theta^*$ (Lead) | Top 1% (Lead) | Peak Texas / Min Eq% / Max Bro% |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Colonial Bank** (`9609`, AL) | `GFC` / `2009-08-14` | `$25,455.1` | `0.0174` | **Yes** (`2009-03-31`, **`136 d`**) | No | `0.572` / `5.60%` / `12.51%` |
-| **Guaranty Bank** (`32618`, TX) | `GFC` / `2009-08-21` | `$13,464.4` | `0.5524` | **Yes** (`2009-03-31`, **`143 d`**) | **Yes** (`143 d`) | `10.000` / `-5.60%` / `4.49%` |
-| **AmTrust Bank** (`29776`, OH) | `GFC` / `2009-12-04` | `$11,439.0` | `0.3743` | **Yes** (`2009-03-31`, **`248 d`**) | **Yes** (`157 d`) | `2.677` / `2.42%` / `4.11%` |
-| **United Commercial** (`32469`, CA) | `GFC` / `2009-11-06` | `$10,895.3` | `0.0363` | **Yes** (`2009-06-30`, **`129 d`**) | No | `0.569` / `9.30%` / `14.39%` |
-| **Westernbank PR** (`31027`, PR) | `GFC` / `2010-04-30` | `$10,797.3` | `0.0797` | **Yes** (`2009-06-30`, **`304 d`**) | No | `1.767` / `3.92%` / `75.65%` |
-| **First Republic Bank** (`59017`, CA) | `Modern` / `2023-05-01` | `$212,638.9` | `0.0001` | *No (`NOT_FLAGGED`)* | *No* | `0.008` / `8.20%` / `3.00%` |
-| **Silicon Valley Bank** (`24735`, CA) | `Modern` / `2023-03-10` | `$209,026.0` | `0.0001` | *No (`NOT_FLAGGED`)* | *No* | `0.009` / `6.69%` / `0.00%` |
-| **Signature Bank** (`57053`, NY) | `Modern` / `2023-03-12` | `$110,363.6` | `0.0002` | *No (`NOT_FLAGGED`)* | *No* | `0.028` / `6.71%` / `4.29%` |
-| **Doral Bank** (`32102`, PR) | `Modern` / `2015-02-27` | `$5,898.5` | `0.0865` | **Yes** (`2014-03-31`, **`333 d`**) | **Yes** (`242 d`) | `1.415` / `6.16%` / `25.44%` |
-| **Republic Bank** (`27332`, PA) | `Modern` / `2024-04-26` | `$5,866.2` | `0.0139` | **Yes** (`2023-06-30`, **`301 d`**) | **Yes** (`301 d`) | `0.198` / `1.34%` / `6.85%` |
+| Colonial Bank (9609, AL) | GFC / 2009-08-14 | 25,455.1 | 0.0174 | Yes (2009-03-31, 136 d) | No | 0.572 / 5.60% / 12.51% |
+| Guaranty Bank (32618, TX) | GFC / 2009-08-21 | 13,464.4 | 0.5524 | Yes (2009-03-31, 143 d) | Yes (143 d) | 10.000 / -5.60% / 4.49% |
+| AmTrust Bank (29776, OH) | GFC / 2009-12-04 | 11,439.0 | 0.3743 | Yes (2009-03-31, 248 d) | Yes (157 d) | 2.677 / 2.42% / 4.11% |
+| United Commercial (32469, CA) | GFC / 2009-11-06 | 10,895.3 | 0.0363 | Yes (2009-06-30, 129 d) | No | 0.569 / 9.30% / 14.39% |
+| Westernbank PR (31027, PR) | GFC / 2010-04-30 | 10,797.3 | 0.0797 | Yes (2009-06-30, 304 d) | No | 1.767 / 3.92% / 75.65% |
+| First Republic Bank (59017, CA) | Modern / 2023-05-01 | 212,638.9 | 0.0001 | No | No | 0.008 / 8.20% / 3.00% |
+| Silicon Valley Bank (24735, CA) | Modern / 2023-03-10 | 209,026.0 | 0.0001 | No | No | 0.009 / 6.69% / 0.00% |
+| Signature Bank (57053, NY) | Modern / 2023-03-12 | 110,363.6 | 0.0002 | No | No | 0.028 / 6.71% / 4.29% |
+| Doral Bank (32102, PR) | Modern / 2015-02-27 | 5,898.5 | 0.0865 | Yes (2014-03-31, 333 d) | Yes (242 d) | 1.415 / 6.16% / 25.44% |
+| Republic Bank (27332, PA) | Modern / 2024-04-26 | 5,866.2 | 0.0139 | Yes (2023-06-30, 301 d) | Yes (301 d) | 0.198 / 1.34% / 6.85% |
 
-Every top-5 **GFC** credit closure was flagged **129–304 days** before receivership, alongside modern credit-erosion failures like **Doral Bank** (`333 d`) and **Republic Bank** (`301 d`). As plotted in Figure 6.4 (right), **Silicon Valley Bank**, **Signature Bank**, and **First Republic** stayed flat near $5\times 10^{-5}$ due to near-zero credit delinquencies and rapid uninsured deposit runs (`DEPUNINS`) / unrealized HTM bond losses (`SCHA`/`SCHF`) outside our 1984–2026 uniform schema.
+*Note(s):* Selection covers the top five FDIC formal closures (`RESTYPE == FAILURE`) by asset size (`QBFASSET`) in each subperiod. Lead days measure the interval from the first scorable flagged quarter to formal closure. Source: `outputs/tables/canary_case_studies.csv`.
 
----
-
-## 7. Part 6: Conclusions, Limitations & Adaptation for Vietnam [5 pts]
-
-### 7.1 Limitations of the Empirical Pipeline
-1. **Restated Call Report Snapshots vs. Vintage Filings:** FDIC API history includes subsequent accounting restatements; our 60-day lag enforces publication timing without point-in-time restatement archives.
-2. **Credit-Insolvency vs. Interest-Rate/Liquidity Run Regimes:** Trained on 1984–2007 credit crises, the model achieves **`0.5847` PR-AUC (`0.9881` ROC-AUC)** in the 2009–2014 GFC and **`0.1708` PR-AUC (`0.9193` ROC-AUC)** in 2015–2025 (`Recall@Top-1% = 66.98%`), missing rapid uninsured-deposit runs (`DEPUNINS`, `SCHA`/`SCHF`) not uniformly populated since 1984.
-3. **Unobserved Supervisory Forbearance & Assisted Mergers:** Private emergency absorptions without formal FDIC `failures` rows appear as censored mergers rather than failures.
-
-### 7.2 What Would Change for Vietnam (State Bank of Vietnam — SBV)?
-Deploying this early-warning pipeline at the **State Bank of Vietnam (SBV / Ngân hàng Nhà nước Việt Nam)** requires four structural adaptations:
-1. **Institutional Sample Size & Redefining the Failure Label ($y_{i,q}$):**  
-   Unlike the US (which had >18,000 insured banks in 1984 and 4,117 outright closures), Vietnam's banking system comprises roughly **35 domestic commercial banks** (4 state-owned SOCBs and ~31 joint-stock commercial banks) plus foreign bank branches, and the SBV has historically prioritized system stability over formal bankruptcy liquidations. Distressed Vietnamese banks do not enter FDIC-style receivership; instead, they are placed under **SBV Special Control (*Kiểm soát đặc biệt*)**, **Mandatory Zero-Dong Transfer (*Chuyển giao bắt buộc 0 đồng*, e.g., OceanBank, CB, GPBank in 2015; DongA Bank; SCB in 2022)**, or emergency refinancing. Consequently, for Vietnam, $y_{i,q} = 1$ must be defined as **entry into Special Control, mandatory restructuring, emergency liquidity support, or severe composite CAMELS downgrade**, rather than legal liquidation.
-2. **Regulatory Accounting Adjustments (VAS, VAMC Bonds & Circular 11/2021/TT-NHNN):**  
-   Vietnamese banks report under Vietnamese Accounting Standards (VAS) rather than US GAAP/IFRS 9. Historically, distressed banks transferred bad loans to the **Vietnam Asset Management Company (VAMC)** in exchange for special bonds (*trái phiếu đặc biệt VAMC*) or restructured debt under COVID-19 forbearance circulars (Circular 01/2020, Circular 02/2023). An SBV feature pipeline must compute an **Adjusted Texas Ratio** that adds **Group 2 (Special Mention) loans, Group 3–5 NPLs, and unprovisioned VAMC special bonds** in the numerator, alongside Circular 41/2016/TT-NHNN (Basel II) CAR ratios.
-3. **Granular Supervisory Data Sources (CIC + CITAD):**  
-   Because $N=35$ banks is too small for a purely cross-sectional machine learning model on quarterly balance sheets alone, an SBV early-warning pipeline should combine monthly supervisory balance-sheet filings with **CIC (Credit Information Center) borrower-level credit registry data** (tracking cross-bank NPL contagion and related-party/ecosystem lending concentration) and **CITAD daily interbank payment/liquidity flows** (detecting sudden retail deposit withdrawals or interbank interest-rate spikes in real time, as seen in the October 2022 SCB run).
-4. **Infrastructure Sizing at SBV:**  
-   While bank-level monthly panels for ~50 institutions fit effortlessly in Polars on a single workstation (<50 MB), integrating **CIC borrower-level exposures** (tens of millions of loans across quarters) and **daily CITAD payment streams** pushes the working set into hundreds of gigabytes—precisely crossing the threshold established in **Part 3 (Q1)** where our Bronze/Silver/Gold Parquet architecture transitions from single-node Polars to an on-premise **SBV Apache Spark cluster**.
+Every top-five GFC credit-insolvency failure is flagged 129 to 304 days before closure, alongside modern credit-erosion failures such as Doral Bank (333 d lead) and Republic Bank (301 d lead). In sharp contrast, as shown in Figure 6 (right), Silicon Valley Bank, Signature Bank, and First Republic Bank remained near $\hat{p} \approx 5 \times 10^{-5}$ prior to their rapid 2023 collapses because their distress stemmed from concentrated uninsured deposit runs (DEPUNINS) and unrealized held-to-maturity bond duration losses (SCHA and SCHF) rather than credit delinquency—exposing the exact boundary of credit-trained Call Report models.
 
 ---
 
-## 8. Academic Integrity, Citations & Reproducibility
+## 7. Conclusions, Limitations, and Adaptation for Vietnam (Part 6)
 
-### 8.1 Academic References & Open-Source Citations
-1. **Data Source & Official Institutional References:** Federal Deposit Insurance Corporation (FDIC) BankFind Suite API (`https://api.fdic.gov/banks`), RISView Field Dictionary (`https://api.fdic.gov/banks/docs/`), FDIC 2024 Annual Report (Risk Management examination counts), and FDIC Proposed 2025 Operating Budget (Division of Risk Management Supervision Ongoing Operations budget). Starter script adapted from `fdic_download_starter.py` provided by the BFT65B course instructor.
-2. **Literature:**
-   * Wheelock, D. C., & Wilson, P. W. (2000). *Why do banks disappear? The determinants of U.S. bank failures and acquisitions.* Review of Economics and Statistics, 82(1), 127–138.
-   * Shumway, T. (2001). *Forecasting bankruptcy more accurately: A simple hazard model.* The Journal of Business, 74(1), 101–124.
-   * Cole, R. A., & White, L. J. (2012). *Déjà vu all over again: The causes of U.S. commercial bank failures this time around.* Journal of Financial Services Research, 42(1), 5–29.
-   * Elkan, C. (2001). *The foundations of cost-sensitive learning.* Proceedings of the 17th International Joint Conference on Artificial Intelligence (IJCAI), 973–978.
-3. **Comparative Review of Related Open-Source Repositories Consulted:**  
-   Per academic integrity guidelines, all public FDIC-related repositories reviewed during research design are cited below alongside our methodological improvements:
+### 7.1 Empirical Limitations
 
-| Open-Source Reference | Focus & Domain Inspiration Drawn | Limitations Overcome in Our BFT65B Pipeline |
+Three limitations qualify our empirical findings. First, FDIC API history reflects restated Call Report snapshots rather than original unrevised vintage filings; although our 60-day availability gate enforces publication timing, true archival restatement histories are not publicly exposed via the REST endpoint. Second, trained on 1984–2007 credit crises, the champion model attains 0.5847 PR-AUC (0.9881 ROC-AUC) during the 2009–2014 GFC and 0.1708 PR-AUC (0.9193 ROC-AUC; Recall@Top-1% of 66.98%) during 2015–2025, missing interest-rate and uninsured-deposit liquidity runs whose schedules were not uniformly populated back to 1984. Third, private supervisory-brokered absorptions completed without formal FDIC resolution entries appear in historical data as censored mergers rather than observed failures.
+
+### 7.2 Structural Adaptation for the State Bank of Vietnam (SBV)
+
+Deploying this early-warning architecture at the State Bank of Vietnam (SBV) requires four concrete institutional and engineering adaptations. First, regarding sample size and target-label definition, whereas the U.S. system encompassed over 18,000 insured banks in 1984 and 4,117 historical closures, Vietnam's banking sector consists of roughly 35 domestic commercial banks (four state-owned commercial banks and approximately 31 joint-stock commercial banks) alongside foreign bank branches. Because the SBV prioritizes systemic stability over formal bankruptcy liquidation, distressed banks enter SBV Special Control (*Kiểm soát đặc biệt*), mandatory zero-dong transfers (*Chuyển giao bắt buộc 0 đồng*, such as OceanBank, CB, and GPBank in 2015; DongA Bank; and SCB in 2022), or emergency liquidity support. For Vietnam, $y_{i,q}=1$ must therefore be defined as entry into Special Control, mandatory restructuring, emergency refinancing, or a severe composite CAMELS downgrade rather than legal closure.
+
+Second, regulatory accounting adjustments are essential under Vietnamese Accounting Standards (VAS) and Circular 11/2021/TT-NHNN. Historically, Vietnamese banks transferred nonperforming loans to the Vietnam Asset Management Company (VAMC) in exchange for special bonds (*trái phiếu đặc biệt VAMC*) or restructured exposures under COVID-19 forbearance circulars (Circular 01/2020 and Circular 02/2023). An SBV feature pipeline must therefore compute an Adjusted Texas Ratio combining Group 2 (Special Mention) loans, Group 3–5 nonperforming loans, and unprovisioned VAMC special bonds in the numerator, paired with Circular 41/2016/TT-NHNN (Basel II) capital adequacy ratios.
+
+Third, because a cross-section of 35 banks is too small to sustain machine learning on quarterly balance sheets alone, an operational SBV EWS must fuse monthly regulatory filings with granular Credit Information Center (CIC) borrower-level credit registries (capturing cross-bank nonperforming-loan contagion and ecosystem or related-party concentration) and daily CITAD interbank payment and liquidity flows (detecting sudden retail deposit runs or interbank rate spikes in real time, as observed during the October 2022 SCB episode).
+
+Fourth, infrastructure sizing follows directly from our Part 3 scaling boundary. Bank-level monthly panels for approximately 50 institutions require less than 50 MB and execute instantaneously in single-node Polars. Once the SBV integrates tens of millions of quarterly CIC borrower exposures alongside daily CITAD payment streams, however, the active dataset scales into hundreds of gigabytes—crossing the exact 30–50 million row threshold established in Section 4 where the Bronze, Silver, and Gold Parquet lakehouse transitions from laptop Polars to an on-premise SBV Apache Spark cluster.
+
+---
+
+## 8. Academic Integrity, References, and Reproducibility
+
+### 8.1 References
+
+<!-- BLOCK:REFERENCES:START -->
+Cole, R. A., & White, L. J. (2012). Déjà vu all over again: The causes of U.S. commercial bank failures this time around. *Journal of Financial Services Research*, 42(1), 5–29.
+
+Elkan, C. (2001). The foundations of cost-sensitive learning. *Proceedings of the 17th International Joint Conference on Artificial Intelligence (IJCAI)*, 973–978.
+
+Federal Deposit Insurance Corporation (FDIC). (2024). *2024 Annual Report* (Division of Risk Management Supervision examination counts). Washington, DC: FDIC.
+
+Federal Deposit Insurance Corporation (FDIC). (2025). *Proposed 2025 Operating Budget* (Division of Risk Management Supervision Ongoing Operations budget). Washington, DC: FDIC.
+
+Federal Deposit Insurance Corporation (FDIC). (2026). *BankFind Suite Public REST API and RISView Field Dictionary*. Available at: [https://api.fdic.gov/banks/docs/](https://api.fdic.gov/banks/docs/) (accessed 5 November 2026).
+
+Shumway, T. (2001). Forecasting bankruptcy more accurately: A simple hazard model. *The Journal of Business*, 74(1), 101–124.
+
+Wheelock, D. C., & Wilson, P. W. (2000). Why do banks disappear? The determinants of U.S. bank failures and acquisitions. *Review of Economics and Statistics*, 82(1), 127–138.
+<!-- BLOCK:REFERENCES:END -->
+
+### 8.2 Open-Source Repositories Consulted and AI Tool Disclosure
+
+Per course academic integrity guidelines, Table 13 documents every public FDIC-related repository reviewed during research design together with the methodological limitations overcome in this pipeline. The data-acquisition client was adapted from the instructor-provided starter script (`fdic_download_starter.py`).
+
+**Table 13.** Comparative review of related public open-source repositories consulted during pipeline design.
+
+| Open-Source Reference | Domain Focus and Inspiration Drawn | Methodological Improvements in Our Pipeline |
 | :--- | :--- | :--- |
-| [`batuhanisik751/bank-failure-early-warning`](https://github.com/batuhanisik751/bank-failure-early-warning) | Domain feature intuition (CAMELS, Texas Ratio baseline, walk-forward CV, FDIC cost logic). | Single-node Pandas only; our repo re-implements in Bronze/Silver/Gold **Polars + PySpark** (`1.68M` rows), adds `PriorOddsCalibrator`, episode cost, & fixed capacity rules. |
-| [`Tajaddin/bank-early-warning`](https://github.com/Tajaddin/bank-early-warning) | Classical R/SQL CAMELS econometrics, directional variable interpretation, out-of-time validation. | R script lacks columnar Parquet benchmarking & distributed Spark parity; we pair **HGB permutation importance** with standardized **Logit coefficients** over 42 years. |
-| [`vfabuluje/Canary`](https://github.com/vfabuluje/Canary) | *"Canary in the coal mine"* supervisory framing and case-level tracking of major bank stress. | Rule/liquidity dashboard without walk-forward ML calibration; we formalize **post-hoc Canary case studies** across GFC & Modern `TEST` failures (`lead_days_theta`). |
-| [`martinogie/bank-health-data-platform`](https://github.com/martinogie/bank-health-data-platform) | Medallion lakehouse conceptual inspiration for FDIC Call Report data engineering. | Engineering BI focus without 42-year schema-drift DQ audit, merger censoring, or forward failure ML; we close the full loop through `Gold` and Part 5. |
-| [`saivardhan13-MSV/fdic-bank-health-pipeline`](https://github.com/saivardhan13-MSV/fdic-bank-health-pipeline) | Cloud/ETL ingestion workflow patterns over FDIC financial metrics. | Lacks PyArrow Hive compression benchmarks, YTD flow de-cumulation tests, 60-day PIT lag enforcement, and Spark vs. Polars numerical parity verification. |
-| [`heltonwo/fdic-failed-banks-etl`](https://github.com/heltonwo/fdic-failed-banks-etl) | Lightweight ETL structure for FDIC historical `banklist` closure records. | Processes failures only (severe **survivorship/selection bias**); we link closures to `24,064` surviving/merged banks (`1.68M` rows) for unbiased risk estimation. |
-| [`Zahivc/Bank-Bankruptcy-Predictions`](https://github.com/Zahivc/Bank-Bankruptcy-Predictions) | ML/DL experimentation for bank bankruptcy classification on FDIC extracts. | Uses **SMOTE + random splits** (severe **temporal data leakage** & distorted priors); we preserve strict temporal splits and use **Elkan (2001) Bayes prior-odds calibration**. |
-| [`zekaili/bank-loan-failure-prediction`](https://www.kaggle.com/code/zekaili/bank-loan-failure-prediction) | Evaluated during early planning for binary credit classification workflows. | Targets retail consumer loan defaults rather than institutional bank Call Reports; excluded from pipeline implementation. |
+| [`batuhanisik751/bank-failure-early-warning`](https://github.com/batuhanisik751/bank-failure-early-warning) | CAMELS intuition, Texas Ratio baseline, walk-forward CV, FDIC cost logic | Re-implemented in Medallion Polars and PySpark (1.68M rows); added Bayes prior-odds calibration, episode cost, and capacity budgets |
+| [`Tajaddin/bank-early-warning`](https://github.com/Tajaddin/bank-early-warning) | Classical R/SQL CAMELS econometrics and directional variable interpretation | Added columnar Parquet benchmarks, PySpark parity, and 42-year HGB permutation importance paired with standardized Logit coefficients |
+| [`vfabuluje/Canary`](https://github.com/vfabuluje/Canary) | Canary-in-the-coal-mine supervisory framing and failure case tracking | Replaced heuristic dashboard with walk-forward calibrated ML and formal post-hoc Canary diagnostics across GFC and modern failures |
+| [`martinogie/bank-health-data-platform`](https://github.com/martinogie/bank-health-data-platform) | Medallion lakehouse conceptual framing for FDIC Call Report engineering | Extended beyond BI ingestion to 42-year schema-drift audits, merger censoring, CBLR remediation, and forward failure modelling |
+| [`saivardhan13-MSV/fdic-bank-health-pipeline`](https://github.com/saivardhan13-MSV/fdic-bank-health-pipeline) | Cloud/ETL ingestion workflow patterns over FDIC financial metrics | Added PyArrow Hive Zstd benchmarks, YTD flow de-cumulation tests, 60-day PIT lag enforcement, and Spark-Polars numerical parity |
+| [`heltonwo/fdic-failed-banks-etl`](https://github.com/heltonwo/fdic-failed-banks-etl) | Lightweight ETL structure for historical FDIC closure records | Eliminated survivorship bias by linking closures to all 24,064 surviving and merged banks across 1.68M bank-quarters |
+| [`Zahivc/Bank-Bankruptcy-Predictions`](https://github.com/Zahivc/Bank-Bankruptcy-Predictions) | ML/DL experimentation for bank bankruptcy classification on FDIC extracts | Avoided SMOTE and random splits (severe temporal leakage and distorted priors) in favor of strict temporal splits and Elkan (2001) calibration |
+| [`zekaili/bank-loan-failure-prediction`](https://www.kaggle.com/code/zekaili/bank-loan-failure-prediction) | Reviewed during initial scoping for binary credit classification workflows | Targets retail consumer loan defaults rather than institutional bank Call Reports; excluded from pipeline implementation |
 
-4. **AI Tool Disclosure:** Google Antigravity AI coding assistant was used for pair-programming pipeline modularization, debugging schema drift/PySpark configurations, and formatting documentation. All experimental designs, empirical measurements, and supervisory interpretations were verified against the local dataset.
+*AI Tool Disclosure:* Google Antigravity AI coding assistant was used for pair-programming pipeline modularization, debugging schema drift and PySpark configurations, and typesetting documentation. All experimental designs, empirical measurements, statistical tests, and supervisory interpretations were independently verified against local data outputs.
 
-### 8.2 End-to-End Reproducibility (`run_all.sh`)
-From a clean clone of this repository (with raw data placed in `./data_raw/fdic` or downloaded via `python scripts/00_download.py`):
-```bash
-bash run_all.sh
-```
-This executes `01_storage.py` $\rightarrow$ `02_quality.py` $\rightarrow$ `03_panel.py` $\rightarrow$ `04_features.py` $\rightarrow$ `05_benchmark.py` $\rightarrow$ `06_spark.py` $\rightarrow$ `07_model.py` $\rightarrow$ `08_build_notebooks_and_report.py` $\rightarrow$ `09_check_report_numbers.py` $\rightarrow$ `pytest tests/` deterministically (`seed = 42`), logging per-step wall-clock times to `outputs/tables/run_all_timing.txt`.
+### 8.3 End-to-End Reproducibility
+
+From a clean clone of the repository with raw data placed in `./data_raw/fdic` (or downloaded via `python scripts/00_download.py --download`), executing `bash run_all.sh` deterministically runs `01_storage.py` through `09_check_report_numbers.py` followed by `pytest tests/` (`seed = 42`), regenerating all tables, figures, notebooks, and this report while logging per-step runtimes to `outputs/tables/run_all_timing.txt`.

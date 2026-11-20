@@ -326,29 +326,33 @@ def sync_benchmarks_into_docs() -> None:
     parity_sum_sci = _format_latex_sci(float(parity["yearly_fingerprint"]["max_relative_diff_of_sums"]))
 
     q1_block = (
-        f"* **Q1 (Storage, Laptop Processing & When a Spark Cluster is Needed):**  \n"
-        f"  Four decades of quarterly bank reports (`1.68M` rows $\\times$ `33` fields) compress from **{csv_r['size_mb']:.1f} MB** in raw uncompressed CSV "
-        f"down to **{hive_r['size_mb']:.1f} MB** (`{hive_r['compression_vs_csv']:.2f}x` compression; write time **{hive_r['write_s']:.3f} s**) when stored as "
-        f"**Hive-partitioned Apache Parquet** (`YEAR=YYYY`) with **Zstandard (level 3)** compression, explicit canonical typing (`Int32` keys, `Date32`, `Float64` measures), "
-        f"and sorted `(REPDTE, CERT)` row groups. On our measured **1x–8x multi-scale stress test** (`1.68M` up to **`13.46M` rows**, `{env['cpu_logical']}` logical CPUs, "
-        f"`{env['ram_total_gb']:.2f} GB` RAM, `POLARS_MAX_THREADS=4`), **Polars Streaming** completes **`13.46M` rows in `{ps8['time_s']:.3f} s`** (`{int(ps8['peak_rss_mb']):,} MB` peak RSS) and "
-        f"**Polars Lazy** in `{pl8['time_s']:.3f} s` (`{int(pl8['peak_rss_mb']):,} MB`), scaling at only **`{ps_s['mb_per_million_rows']:.1f} MB / million rows`** "
-        f"(`~{ps_s['rows_millions_until_16gb']:.1f}M` rows capacity in `16 GB` RAM) compared with **`{pd_s['mb_per_million_rows']:.1f} MB / million rows`** for **Pandas + pushdown** "
-        f"(`{pd_s['rows_millions_until_16gb']:.1f}M` rows limit) and **`{int(pn1['peak_rss_mb']):,} MB`** at `1x` alone for **Pandas Naive**. At equal **4-thread** concurrency, local **PySpark 4.3 (`local[4]`)** reproduces "
-        f"identical numeric results (${parity_sum_sci}$ yearly-sum parity, $0.000$ sample max diff) in **`{sp1_4['total_s']:.3f} s` at `1x`** (`{sp1_4['peak_rss_tree_mb']:,.1f} MB` "
-        f"Python+JVM tree RSS) and **`{sp4_4['total_s']:.3f} s` at `4x` (`6.73M` rows, `{sp4_4['peak_rss_tree_mb']:,.1f} MB` tree RSS; `local[2]`: `{sp4_2['total_s']:.3f} s`)**. A distributed Spark cluster is therefore **unnecessary** "
-        f"for quarterly bank-level Call Reports (`<30M` rows fit comfortably in Polars on a laptop), and becomes justified only when expanding to ~2,400 regulatory schedules, "
-        f"borrower-level credit registries ($>10^8$ rows), or high-frequency interbank settlement streams exceeding ~32–64 GB single-node memory."
+        f"With respect to the first research question—storage layout, laptop-scale processing, and the economic threshold for a distributed Spark cluster—"
+        f"four decades of quarterly bank reports (1.68 million rows across 33 fields) compress from {csv_r['size_mb']:.1f} MB in raw uncompressed CSV "
+        f"down to {hive_r['size_mb']:.1f} MB ({hive_r['compression_vs_csv']:.2f}x compression; write time {hive_r['write_s']:.3f} s) when stored as "
+        f"Hive-partitioned Apache Parquet (YEAR=YYYY) with Zstandard level-3 compression, explicit canonical typing (Int32 keys, Date32 dates, Float64 measures), "
+        f"and sorted (REPDTE, CERT) row groups. On a measured 1x–8x multi-scale stress test spanning 1.68 million up to 13.46 million rows ({env['cpu_logical']} logical CPUs, "
+        f"{env['ram_total_gb']:.2f} GB RAM, 4 Polars threads), Polars Streaming completes 13.46 million rows in {ps8['time_s']:.3f} s ({int(ps8['peak_rss_mb']):,} MB peak RSS) and "
+        f"Polars Lazy finishes in {pl8['time_s']:.3f} s ({int(pl8['peak_rss_mb']):,} MB), scaling at only {ps_s['mb_per_million_rows']:.1f} MB per million rows "
+        f"(an extrapolated ceiling of {ps_s['rows_millions_until_16gb']:.1f} million rows in 16 GB RAM) compared with {pd_s['mb_per_million_rows']:.1f} MB per million rows for Pandas with pushdown "
+        f"({pd_s['rows_millions_until_16gb']:.1f} million row ceiling) and {int(pn1['peak_rss_mb']):,} MB at 1x alone for naive Pandas. At equal 4-thread concurrency, local PySpark 4.3 (`local[4]`) reproduces "
+        f"identical numeric results (${parity_sum_sci}$ yearly-sum parity, $0.000$ sample maximum difference) in {sp1_4['total_s']:.3f} s at 1x ({sp1_4['peak_rss_tree_mb']:,.1f} MB "
+        f"Python+JVM tree RSS) and {sp4_4['total_s']:.3f} s at 4x (6.73 million rows, {sp4_4['peak_rss_tree_mb']:,.1f} MB tree RSS; `local[2]`: {sp4_2['total_s']:.3f} s). A distributed Spark cluster is therefore unnecessary "
+        f"for quarterly bank-level Call Reports—panels below 30–50 million rows fit comfortably in Polars on a standard laptop—and becomes justified only when expanding to roughly 2,400 regulatory schedules, "
+        f"borrower-level credit registries exceeding $10^8$ rows, or high-frequency interbank settlement streams exceeding 32–64 GB single-node memory."
     )
 
     p1_table = "\n".join([
-        "| Storage Format & Layout | Disk Size (MB) | Compression | Write (s) | Full Scan (s) | 3-Col Proj (s) | `YEAR=2023` Filter (s) |",
+        "**Table 2.** Storage layout, compression ratio, and query-latency benchmark across 170 quarters of FDIC financials.",
+        "",
+        "| Storage Format and Layout | Disk Size (MB) | Compression | Write (s) | Full Scan (s) | 3-Col Proj (s) | YEAR=2023 Filter (s) |",
         "| :--- | :---: | :---: | :---: | :---: | :---: | :---: |",
-        f"| **Raw CSV (Uncompressed)** | `{csv_r['size_mb']:.1f}` | `{csv_r['compression_vs_csv']:.2f}x` | `{csv_r['write_s']:.3f}` | `{csv_r['full_read_s']:.3f}` | `{csv_r['read_3_cols_s']:.3f}` | `{csv_r['filter_2023_s']:.3f}` |",
-        f"| **Single Parquet (Snappy)** | `{snappy_r['size_mb']:.1f}` | `{snappy_r['compression_vs_csv']:.2f}x` | `{snappy_r['write_s']:.3f}` | `{snappy_r['full_read_s']:.3f}` | `{snappy_r['read_3_cols_s']:.3f}` | `{snappy_r['filter_2023_s']:.3f}` |",
-        f"| **Single Parquet (Zstd L3)** | `{zstd_r['size_mb']:.1f}` | `{zstd_r['compression_vs_csv']:.2f}x` | `{zstd_r['write_s']:.3f}` | `{zstd_r['full_read_s']:.3f}` | `{zstd_r['read_3_cols_s']:.3f}` | `{zstd_r['filter_2023_s']:.3f}` |",
-        f"| **Hive Parquet (`YEAR=`, Zstd L3, Chosen)** | **`{hive_r['size_mb']:.1f}`** | **`{hive_r['compression_vs_csv']:.2f}x`** | `{hive_r['write_s']:.3f}` | **`{hive_r['full_read_s']:.3f}`** | **`{hive_r['read_3_cols_s']:.3f}`** | **`{hive_r['filter_2023_s']:.3f}`** |",
-        f"| **Pandas Baseline (`read_csv` / `read_parquet`)** | `{pd_csv_r['size_mb']:.1f}` / `{pd_pq_r['size_mb']:.1f}` | `{pd_csv_r['compression_vs_csv']:.2f}x` / `{pd_pq_r['compression_vs_csv']:.2f}x` | — | `{pd_csv_r['full_read_s']:.3f}` / `{pd_pq_r['full_read_s']:.3f}` | — | — |",
+        f"| Raw CSV (Uncompressed) | {csv_r['size_mb']:.1f} | {csv_r['compression_vs_csv']:.2f}x | {csv_r['write_s']:.3f} | {csv_r['full_read_s']:.3f} | {csv_r['read_3_cols_s']:.3f} | {csv_r['filter_2023_s']:.3f} |",
+        f"| Single Parquet (Snappy) | {snappy_r['size_mb']:.1f} | {snappy_r['compression_vs_csv']:.2f}x | {snappy_r['write_s']:.3f} | {snappy_r['full_read_s']:.3f} | {snappy_r['read_3_cols_s']:.3f} | {snappy_r['filter_2023_s']:.3f} |",
+        f"| Single Parquet (Zstd L3) | {zstd_r['size_mb']:.1f} | {zstd_r['compression_vs_csv']:.2f}x | {zstd_r['write_s']:.3f} | {zstd_r['full_read_s']:.3f} | {zstd_r['read_3_cols_s']:.3f} | {zstd_r['filter_2023_s']:.3f} |",
+        f"| **Hive Parquet (YEAR=, Zstd L3, Chosen)** | **{hive_r['size_mb']:.1f}** | **{hive_r['compression_vs_csv']:.2f}x** | **{hive_r['write_s']:.3f}** | **{hive_r['full_read_s']:.3f}** | **{hive_r['read_3_cols_s']:.3f}** | **{hive_r['filter_2023_s']:.3f}** |",
+        f"| Pandas Baseline (read\\_csv / read\\_parquet) | {pd_csv_r['size_mb']:.1f} / {pd_pq_r['size_mb']:.1f} | {pd_csv_r['compression_vs_csv']:.2f}x / {pd_pq_r['compression_vs_csv']:.2f}x | — | {pd_csv_r['full_read_s']:.3f} / {pd_pq_r['full_read_s']:.3f} | — | — |",
+        "",
+        "*Note(s):* All timings report wall-clock medians across repeated reads of the 1,682,616-row panel in Polars (4 threads) unless designated as Pandas. Source measurements are stored in `outputs/tables/part1_storage_benchmark.csv`.",
     ])
 
     ram_pct_more = round((pd4["peak_rss_mb"] / ps4["peak_rss_mb"] - 1.0) * 100.0)
@@ -356,31 +360,33 @@ def sync_benchmarks_into_docs() -> None:
     spark_slowdown_4t = sp4_4["total_s"] / ps4["time_s"]
     spark_compute_slowdown_4t = sp4_4["compute_s"] / ps4["time_s"]
     p3_section = (
-        f"### 4.2 Multi-Scale Benchmark (`1x–8x`, Up to `13.46M` Rows) vs. Pandas & PySpark\n"
-        f"Tested on a Linux workstation (**`{env['cpu_physical']}` physical / `{env['cpu_logical']}` logical CPUs**, **`{env['ram_total_gb']:.2f} GB` RAM**, "
-        f"Polars `{env['polars']}` capped at `POLARS_MAX_THREADS=4`, pandas `{env['pandas']}`; `outputs/tables/benchmark_environment.json`), we avoid unreliable extrapolation from `<1.7M` sub-slices by generating "
-        f"disjoint replicated panels up to **`8x` (`13,460,928` rows)** in isolated `spawn` subprocesses (`outputs/tables/part3_benchmark_results.csv`, `spark_scaling_results.csv`). "
-        f"For a fair equal-core comparison against 4-thread Polars, PySpark is benchmarked at **`local[4]`** alongside the **`local[2]`** laptop-memory baseline:\n\n"
-        f"| Scale (`Rows`) | Polars (Streaming, 4t) Time / RSS | Polars (Lazy, 4t) Time / RSS | Polars (Eager, 4t) Time / RSS | Pandas + Pushdown Time / RSS | PySpark `local[4]` (4t) Time / Tree RSS *(vs `local[2]`)* |\n"
+        f"### 4.2 Multi-Scale Benchmark (1x–8x, Up to 13.46 Million Rows)\n\n"
+        f"To avoid unreliable linear extrapolation from sub-1.7-million-row slices, we benchmark Polars, Pandas, and PySpark on disjoint replicated panels scaled from "
+        f"1x (1.68 million rows) up to 8x (13,460,928 rows) inside isolated `spawn` subprocesses on a Linux workstation equipped with {env['cpu_physical']} physical ({env['cpu_logical']} logical) CPUs "
+        f"and {env['ram_total_gb']:.2f} GB RAM (Polars {env['polars']} capped at 4 threads; pandas {env['pandas']}). "
+        f"For an equal-core comparison against 4-thread Polars, PySpark is benchmarked at `local[4]` alongside the 2-thread `local[2]` laptop-memory baseline.\n\n"
+        f"**Table 5.** Multi-scale processing runtime and peak memory benchmark across Polars, Pandas, and PySpark (1x–8x).\n\n"
+        f"| Scale (Rows) | Polars Streaming (4t) | Polars Lazy (4t) | Polars Eager (4t) | Pandas + Pushdown | PySpark `local[4]` (4t) *(vs. `local[2]`)* |\n"
         f"| :--- | :---: | :---: | :---: | :---: | :---: |\n"
-        f"| **`1x` (`1.68M`)** | **`{ps1['time_s']:.3f} s`** / `{int(ps1['peak_rss_mb']):,} MB` | `{pl1['time_s']:.3f} s` / `{int(pl1['peak_rss_mb']):,} MB` | `{pe1['time_s']:.3f} s` / **`{int(pe1['peak_rss_mb']):,} MB`** | **`{pd1['time_s']:.3f} s`** / `{int(pd1['peak_rss_mb']):,} MB` *(naive `{pn1['time_s']:.3f} s` / `{int(pn1['peak_rss_mb']):,} MB`)* | `{sp1_4['total_s']:.3f} s` (`{sp1_4['spark_startup_s']:.3f} s` JVM) / `{sp1_4['peak_rss_tree_mb']:,.1f} MB` *(`local[2]`: `{sp1_2['total_s']:.3f} s` / `{sp1_2['peak_rss_tree_mb']:,.1f} MB`)* |\n"
-        f"| **`2x` (`3.37M`)** | **`{ps2['time_s']:.3f} s`** / `{int(ps2['peak_rss_mb']):,} MB` | `{pl2['time_s']:.3f} s` / `{int(pl2['peak_rss_mb']):,} MB` | `{pe2['time_s']:.3f} s` / `{int(pe2['peak_rss_mb']):,} MB` | **`{pd2['time_s']:.3f} s`** / `{int(pd2['peak_rss_mb']):,} MB` | — |\n"
-        f"| **`4x` (`6.73M`)** | **`{ps4['time_s']:.3f} s`** / **`{int(ps4['peak_rss_mb']):,} MB`** | `{pl4['time_s']:.3f} s` / `{int(pl4['peak_rss_mb']):,} MB` | `{pe4['time_s']:.3f} s` / `{int(pe4['peak_rss_mb']):,} MB` | **`{pd4['time_s']:.3f} s`** / **`{int(pd4['peak_rss_mb']):,} MB`** | `{sp4_4['total_s']:.3f} s` (`{sp4_4['compute_s']:.3f} s` compute) / `{sp4_4['peak_rss_tree_mb']:,.1f} MB` *(`local[2]`: `{sp4_2['total_s']:.3f} s` / `{sp4_2['peak_rss_tree_mb']:,.1f} MB`)* |\n"
-        f"| **`8x` (`13.46M`)** | **`{ps8['time_s']:.3f} s`** / `{int(ps8['peak_rss_mb']):,} MB` | `{pl8['time_s']:.3f} s` / **`{int(pl8['peak_rss_mb']):,} MB`** | *(skipped OOM risk)* | *(skipped vs eager overhead)* | — |\n\n"
-        f"*Numeric parity across all Polars, pandas, and PySpark runs:* max relative checksum difference $\\le {_format_latex_sci(max_diff)}$. Measuring across `1x–8x` (`13.46M` rows) reveals why scaling matters "
-        f"(`outputs/tables/part3_capacity_extrapolation.json`): **Polars Streaming** grows memory at just **`{ps_s['mb_per_million_rows']:.1f} MB / million rows`** "
-        f"(`~{ps_s['rows_millions_until_16gb']:.1f}M`-row ceiling in `16 GB` RAM; `{ps_s['seconds_per_million_rows']:.3f} s / M rows`), whereas **Pandas + pushdown** grows at "
-        f"**`{pd_s['mb_per_million_rows']:.1f} MB / million rows`** (`{slope_ratio:.2f}x` steeper RAM slope, exhausting `16 GB` by **`{pd_s['rows_millions_until_16gb']:.1f}M` rows**). "
-        f"At `4x` (`6.73M`), `pandas + pushdown` is fast on pre-sorted 8-column slices (`{pd4['time_s']:.3f} s`), but already consumes `{ram_pct_more}%` more RAM than Polars "
-        f"(`{int(pd4['peak_rss_mb']):,} MB` vs `{int(ps4['peak_rss_mb']):,} MB`).\n\n"
-        f"![Multi-Scale Processing Time and Peak RSS Scaling (1x–8x)](../outputs/figures/part3_scaling_benchmark.png)\n\n"
-        f"### 4.3 PySpark Reproduction, Parity Verification & Cluster Justification\n"
-        f"In `scripts/06_spark.py` (`1.2 GB` driver), Catalyst produces identical numeric outputs across all `43` years (`33,042` sampled rows: `0.0` abs diff; "
-        f"yearly sum diff ${parity_sum_sci}$). Reading `spark_execution_plan.txt` shows two `Exchange` shuffle barriers (`(CERT, YEAR)` followed by coarse `(CERT)` partitioning). "
-        f"Even on an **equal 4-thread footing**, `PySpark local[4]` incurs **`{sp4_4['spark_startup_s']:.3f} s` JVM startup** and reaches **`{sp4_4['total_s']:.3f} s`** total "
-        f"(`{sp4_4['compute_s']:.3f} s` compute, `{sp4_4['peak_rss_tree_mb']:,.1f} MB` Python+JVM tree RSS) at `6.73M` rows vs `{ps4['time_s']:.3f} s` in 4-thread Polars Streaming "
-        f"(**{spark_slowdown_4t:.1f}x slower** end-to-end; **{spark_compute_slowdown_4t:.1f}x slower** compute-only, while `local[2]` takes `{sp4_2['total_s']:.3f} s` / `{sp4_2['peak_rss_tree_mb']:,.1f} MB` — confirming JVM startup and shuffle barriers, not thread count, dominate local latency). "
-        f"Hence **a Spark cluster is unwarranted below ~30–50M rows**, becoming essential only when wide schedules or loan-level credit registries overflow laptop RAM."
+        f"| 1x (1.68M) | {ps1['time_s']:.3f} s / {int(ps1['peak_rss_mb']):,} MB | {pl1['time_s']:.3f} s / {int(pl1['peak_rss_mb']):,} MB | {pe1['time_s']:.3f} s / {int(pe1['peak_rss_mb']):,} MB | {pd1['time_s']:.3f} s / {int(pd1['peak_rss_mb']):,} MB *(naive: {pn1['time_s']:.3f} s / {int(pn1['peak_rss_mb']):,} MB)* | {sp1_4['total_s']:.3f} s ({sp1_4['spark_startup_s']:.3f} s JVM) / {sp1_4['peak_rss_tree_mb']:,.1f} MB *(`local[2]`: {sp1_2['total_s']:.3f} s / {sp1_2['peak_rss_tree_mb']:,.1f} MB)* |\n"
+        f"| 2x (3.37M) | {ps2['time_s']:.3f} s / {int(ps2['peak_rss_mb']):,} MB | {pl2['time_s']:.3f} s / {int(pl2['peak_rss_mb']):,} MB | {pe2['time_s']:.3f} s / {int(pe2['peak_rss_mb']):,} MB | {pd2['time_s']:.3f} s / {int(pd2['peak_rss_mb']):,} MB | — |\n"
+        f"| 4x (6.73M) | **{ps4['time_s']:.3f} s / {int(ps4['peak_rss_mb']):,} MB** | {pl4['time_s']:.3f} s / {int(pl4['peak_rss_mb']):,} MB | {pe4['time_s']:.3f} s / {int(pe4['peak_rss_mb']):,} MB | {pd4['time_s']:.3f} s / {int(pd4['peak_rss_mb']):,} MB | {sp4_4['total_s']:.3f} s ({sp4_4['compute_s']:.3f} s compute) / {sp4_4['peak_rss_tree_mb']:,.1f} MB *(`local[2]`: {sp4_2['total_s']:.3f} s / {sp4_2['peak_rss_tree_mb']:,.1f} MB)* |\n"
+        f"| 8x (13.46M) | **{ps8['time_s']:.3f} s / {int(ps8['peak_rss_mb']):,} MB** | {pl8['time_s']:.3f} s / {int(pl8['peak_rss_mb']):,} MB | *(skipped OOM risk)* | *(skipped eager overhead)* | — |\n\n"
+        f"*Note(s):* Cells report wall-clock runtime / peak RSS (Python+JVM process-tree RSS for PySpark). Maximum relative checksum difference across all Polars, Pandas, and PySpark runs is $\\le {_format_latex_sci(max_diff)}$. "
+        f"Sources: `outputs/tables/part3_benchmark_results.csv`, `spark_scaling_results.csv`, and `benchmark_environment.json`.\n\n"
+        f"Measuring across 1x–8x exposes the structural memory advantage of streaming columnar execution (`outputs/tables/part3_capacity_extrapolation.json`). "
+        f"Polars Streaming grows peak memory at only {ps_s['mb_per_million_rows']:.1f} MB per million rows ({ps_s['seconds_per_million_rows']:.3f} s per million rows, implying a {ps_s['rows_millions_until_16gb']:.1f}-million-row capacity ceiling inside 16 GB RAM), "
+        f"whereas Pandas with column pushdown grows at {pd_s['mb_per_million_rows']:.1f} MB per million rows—a {slope_ratio:.2f}x steeper memory slope that exhausts 16 GB RAM by {pd_s['rows_millions_until_16gb']:.1f} million rows. "
+        f"At 4x scale (6.73 million rows), Pandas with pushdown executes quickly on pre-sorted 8-column slices ({pd4['time_s']:.3f} s) but already consumes {ram_pct_more}% more memory than Polars Streaming "
+        f"({int(pd4['peak_rss_mb']):,} MB vs. {int(ps4['peak_rss_mb']):,} MB), as depicted in Figure 3.\n\n"
+        f"![Multi-scale execution time and peak RSS memory scaling across Polars, Pandas, and PySpark (1x–8x).](../outputs/figures/part3_scaling_benchmark.png)\n\n"
+        f"### 4.3 PySpark Reproduction, Parity Verification, and Cluster Justification\n\n"
+        f"In `scripts/06_spark.py` (1.2 GB driver memory), PySpark Catalyst reproduces Polars outputs identically across all 43 annual partitions, achieving a 0.0 maximum absolute difference across 33,042 sampled rows "
+        f"and a ${parity_sum_sci}$ maximum relative difference in yearly aggregate checksums (`outputs/tables/spark_polars_parity.json`). Inspecting the Catalyst physical plan (`outputs/tables/spark_execution_plan.txt`) reveals two full `Exchange` shuffle barriers—"
+        f"first partitioning by (CERT, YEAR) for YTD de-cumulation, then repartitioning by (CERT) for 4-quarter lags. Even on an equal 4-thread footing, PySpark `local[4]` incurs {sp4_4['spark_startup_s']:.3f} s of JVM startup overhead "
+        f"and requires {sp4_4['total_s']:.3f} s total ({sp4_4['compute_s']:.3f} s compute, {sp4_4['peak_rss_tree_mb']:,.1f} MB Python+JVM tree RSS) at 6.73 million rows compared with {ps4['time_s']:.3f} s in 4-thread Polars Streaming—"
+        f"{spark_slowdown_4t:.1f}x slower end-to-end and {spark_compute_slowdown_4t:.1f}x slower compute-only, while `local[2]` requires {sp4_2['total_s']:.3f} s and {sp4_2['peak_rss_tree_mb']:,.1f} MB tree RSS. "
+        f"These measurements confirm that JVM initialization and shuffle barriers, rather than thread count, dominate local Spark latency. Consequently, a distributed Spark cluster is unwarranted for quarterly bank-level Call Reports below 30–50 million rows and becomes justified only when wide multi-schedule expansions or borrower-level credit registries overflow single-node RAM."
     )
 
     md_path = ROOT / "report" / "report.md"
@@ -430,14 +436,14 @@ local function latex_escape_code(s)
 end
 
 function Code(el)
-  if FORMAT:match "latex" and #el.text > 14 and (el.text:find("/") or el.text:find("_")) then
-    return pandoc.RawInline("latex", "\\texttt{" .. latex_escape_code(el.text) .. "}")
+  if FORMAT:match "latex" then
+    return pandoc.RawInline("latex", "{\\normalfont\\ttfamily " .. latex_escape_code(el.text) .. "}")
   end
 end
 
-function Table(tbl)
+local function compute_col_widths(tbl)
   local ncols = #tbl.colspecs
-  if ncols == 0 then return tbl end
+  if ncols == 0 then return 0 end
   local weights = {}
   local min_chars = {}
   for j = 1, ncols do
@@ -468,10 +474,10 @@ function Table(tbl)
   local sum_w = 0
   local sw = {}
   for j = 1, ncols do
-    sw[j] = math.max(math.sqrt(weights[j]), min_chars[j] * 0.42)
+    sw[j] = math.max(math.sqrt(weights[j]), min_chars[j] * 0.40)
     sum_w = sum_w + sw[j]
   end
-  local min_w = (ncols <= 3) and 0.14 or 0.068
+  local min_w = (ncols <= 3) and 0.16 or 0.068
   local total = 0
   for j = 1, ncols do
     local w = math.max(min_w, (sw[j] / sum_w) * 0.96)
@@ -481,23 +487,116 @@ function Table(tbl)
   for j = 1, ncols do
     tbl.colspecs[j][2] = (sw[j] / total) * 0.96
   end
-  if FORMAT:match "latex" then
-    local sz = (ncols >= 6) and "\\footnotesize" or "\\small"
-    local sep = (ncols >= 8) and "2.8pt" or "3.5pt"
-    return {
-      pandoc.RawBlock("latex", "{" .. sz .. "\\setlength{\\tabcolsep}{" .. sep .. "}"),
-      tbl,
-      pandoc.RawBlock("latex", "}"),
-    }
+  return ncols
+end
+
+local function render_floating_table(cap_para, tbl, note_para)
+  local ncols = compute_col_widths(tbl)
+  local tbl_tex = pandoc.write(pandoc.Pandoc({tbl}), "latex")
+  tbl_tex = tbl_tex:gsub("^%s*{%s*\\def\\LTcaptype{none}[^\n]*\n", "")
+  tbl_tex = tbl_tex:gsub("\n}%s*$", "")
+  tbl_tex = tbl_tex:gsub("\\begin{longtable}%[%]", "\\begin{tabular}")
+  tbl_tex = tbl_tex:gsub("\\begin{longtable}", "\\begin{tabular}")
+  tbl_tex = tbl_tex:gsub("\\endhead%s*\n\\bottomrule\\noalign{}%s*\n\\endlastfoot", "")
+  tbl_tex = tbl_tex:gsub("\\endhead", "")
+  tbl_tex = tbl_tex:gsub("\\endlastfoot", "")
+  tbl_tex = tbl_tex:gsub("\\end{longtable}", "\\bottomrule\n\\end{tabular}")
+
+  local sz = (ncols >= 6) and "\\footnotesize" or "\\small"
+  local sep = (ncols >= 8) and "2.5pt" or "3.5pt"
+  local cap_tex = cap_para and pandoc.write(pandoc.Pandoc({cap_para}), "latex") or ""
+  local note_tex = note_para and pandoc.write(pandoc.Pandoc({note_para}), "latex") or ""
+
+  local parts = {
+    "\\begin{table}[htbp]",
+    "\\centering",
+    "\\begin{minipage}{\\linewidth}",
+  }
+  if cap_tex ~= "" then
+    table.insert(parts, "{\\small\\noindent " .. cap_tex:gsub("%s+$", "") .. "\\par\\vspace{3pt}}")
+  end
+  table.insert(parts, "{\\centering" .. sz .. "\\renewcommand{\\arraystretch}{1.04}\\setlength{\\tabcolsep}{" .. sep .. "}")
+  table.insert(parts, tbl_tex)
+  table.insert(parts, "\\par}")
+  if note_tex ~= "" then
+    table.insert(parts, "{\\vspace{3pt}\\footnotesize\\noindent " .. note_tex:gsub("%s+$", "") .. "\\par}")
+  end
+  table.insert(parts, "\\end{minipage}")
+  table.insert(parts, "\\end{table}")
+  return pandoc.RawBlock("latex", table.concat(parts, "\n"))
+end
+
+function Table(tbl)
+  if not FORMAT:match "latex" then
+    compute_col_widths(tbl)
+    return tbl
   end
   return tbl
+end
+
+function Blocks(blocks)
+  if not FORMAT:match "latex" then return blocks end
+  local out = {}
+  local i = 1
+  while i <= #blocks do
+    local blk = blocks[i]
+    if blk.t == "Para" and pandoc.utils.stringify(blk):match("^Table %d+%.") and i < #blocks and blocks[i + 1].t == "Table" then
+      local note_para = nil
+      local step = 2
+      if i + 2 <= #blocks and blocks[i + 2].t == "Para" then
+        local ntxt = pandoc.utils.stringify(blocks[i + 2])
+        if ntxt:match("^Note%(s%):") or ntxt:match("^Note:") then
+          note_para = blocks[i + 2]
+          step = 3
+        end
+      end
+      table.insert(out, render_floating_table(blk, blocks[i + 1], note_para))
+      i = i + step
+    elseif blk.t == "Table" then
+      table.insert(out, render_floating_table(nil, blk, nil))
+      i = i + 1
+    else
+      table.insert(out, blk)
+      i = i + 1
+    end
+  end
+  return out
 end
 
 function Header(el)
   if FORMAT:match "latex" and el.level == 1 then
     return {
-      pandoc.RawBlock("latex", "\\begin{center}\\Large\\bfseries " .. pandoc.utils.stringify(el) .. "\\end{center}"),
+      pandoc.RawBlock("latex", "\\thispagestyle{firstpage}\\vspace*{-0.35em}\\begin{center}{\\fontsize{15.5}{19}\\selectfont\\bfseries " .. pandoc.utils.stringify(el) .. "}\\end{center}\\vspace{0.2em}"),
     }
+  end
+  return el
+end
+
+function Div(el)
+  if FORMAT:match "latex" then
+    if el.classes:includes("titlemeta") then
+      local out = { pandoc.RawBlock("latex", "\\begin{center}\\small\\setlength{\\parskip}{1.5pt}") }
+      for _, blk in ipairs(el.content) do table.insert(out, blk) end
+      table.insert(out, pandoc.RawBlock("latex", "\\end{center}\\vspace{0.25em}"))
+      return out
+    elseif el.classes:includes("abstract") then
+      local out = { pandoc.RawBlock("latex", "\\begin{abstractbox}\\small\\setlength{\\parindent}{0pt}\\setlength{\\parskip}{3pt}") }
+      for _, blk in ipairs(el.content) do table.insert(out, blk) end
+      table.insert(out, pandoc.RawBlock("latex", "\\end{abstractbox}\\vspace{0.35em}"))
+      return out
+    elseif el.classes:includes("references") then
+      local out = { pandoc.RawBlock("latex", "\\begingroup\\small\\setlength{\\parindent}{0pt}\\setlength{\\parskip}{3pt}") }
+      for _, blk in ipairs(el.content) do
+        if blk.t == "Para" then
+          local ptex = pandoc.write(pandoc.Pandoc({blk}), "latex"):gsub("%s+$", "")
+          table.insert(out, pandoc.RawBlock("latex", "\\noindent\\hangindent=1.5em\\hangafter=1 " .. ptex .. "\\par"))
+        else
+          table.insert(out, blk)
+        end
+      end
+      table.insert(out, pandoc.RawBlock("latex", "\\endgroup"))
+      return out
+    end
   end
   return el
 end
@@ -505,20 +604,27 @@ end
 function Para(el)
   if FORMAT:match "latex" then
     local txt = pandoc.utils.stringify(el)
-    if txt:find("^NATIONAL ECONOMICS UNIVERSITY") then
+    if txt:match("^AI Tool Disclosure:") then
       return {
-        pandoc.RawBlock("latex", "\\begin{center}"),
+        pandoc.RawBlock("latex", "\\begingroup\\noindent\\footnotesize\\setlength{\\parindent}{0pt}\\setlength{\\parskip}{2pt}"),
         el,
-        pandoc.RawBlock("latex", "\\end{center}"),
+        pandoc.RawBlock("latex", "\\endgroup\\vspace{3pt}"),
       }
     end
   end
   return el
 end
 
+function HorizontalRule()
+  if FORMAT:match "latex" then
+    return pandoc.RawBlock("latex", "\\vspace{1pt}")
+  end
+  return {}
+end
+
 function Image(img)
   if FORMAT:match "latex" then
-    img.attributes["width"] = "88%"
+    img.attributes["width"] = "78%"
   elseif FORMAT:match "docx" then
     img.attributes["width"] = "5.8in"
   end
@@ -527,35 +633,78 @@ end
 """
 
 _XELATEX_PREAMBLE = r"""
+\usepackage{xcolor}
+\definecolor{journalblue}{HTML}{003366}
+\definecolor{abstractbg}{HTML}{F3F5F8}
+\definecolor{rulegray}{HTML}{4A5568}
+\usepackage{mdframed}
+\newmdenv[
+  backgroundcolor=abstractbg,
+  linecolor=abstractbg,
+  linewidth=0pt,
+  leftmargin=0pt,
+  rightmargin=0pt,
+  innerleftmargin=10pt,
+  innerrightmargin=10pt,
+  innertopmargin=7pt,
+  innerbottommargin=7pt,
+  skipabove=3pt,
+  skipbelow=4pt
+]{abstractbox}
 \usepackage{float}
-\floatplacement{figure}{H}
+\floatplacement{figure}{htbp}
+\renewcommand{\topfraction}{0.90}
+\renewcommand{\bottomfraction}{0.85}
+\renewcommand{\textfraction}{0.08}
+\renewcommand{\floatpagefraction}{0.75}
+\setlength{\textfloatsep}{10pt plus 2pt minus 2pt}
+\setlength{\intextsep}{9pt plus 2pt minus 2pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
 \usepackage{booktabs}
+\usepackage{calc}
 \usepackage{longtable}
 \usepackage{array}
 \usepackage{xurl}
 \usepackage{fancyhdr}
 \usepackage{caption}
-\captionsetup{font={small,it},labelfont=bf,justification=centering}
-\linespread{1.15}
-\setlength{\parindent}{0pt}
-\setlength{\parskip}{4.5pt}
-\emergencystretch=3em
+\captionsetup{font={small},labelfont=bf,labelsep=period,justification=centering,skip=4pt}
+\linespread{1.07}
+\setlength{\parindent}{1.5em}
+\setlength{\parskip}{1.5pt}
+\emergencystretch=2em
 \pagestyle{fancy}
 \fancyhf{}
-\lhead{\footnotesize\textcolor{gray}{BFT65B — A Big-Data Pipeline for Bank Failure Early Warning}}
-\rhead{\footnotesize\textcolor{gray}{NEU Final Examination Report}}
-\cfoot{\thepage}
-\renewcommand{\headrulewidth}{0.4pt}
+\lhead{\footnotesize\itshape\textcolor{rulegray}{BFT65B — A Big-Data Pipeline for Bank Failure Early Warning}}
+\rhead{\footnotesize\textcolor{rulegray}{National Economics University}}
+\cfoot{\small\thepage}
+\renewcommand{\headrulewidth}{0.45pt}
+\fancypagestyle{firstpage}{
+  \fancyhf{}
+  \lhead{\footnotesize\itshape\textcolor{rulegray}{BFT65B — Big Data Analytics in Finance (Final Research Report)}}
+  \rhead{\footnotesize\textcolor{rulegray}{National Economics University, Hanoi}}
+  \cfoot{\small\thepage}
+  \renewcommand{\headrulewidth}{0.75pt}
+}
 \usepackage{titlesec}
-\titlespacing*{\section}{0pt}{11pt}{4pt}
-\titlespacing*{\subsection}{0pt}{8pt}{3pt}
-\titlespacing*{\subsubsection}{0pt}{6pt}{2pt}
+\titleformat{\section}{\normalfont\fontsize{13}{15}\selectfont\bfseries}{}{0pt}{}
+\titleformat{\subsection}{\normalfont\fontsize{12}{14}\selectfont\bfseries}{}{0pt}{}
+\titleformat{\subsubsection}{\normalfont\fontsize{12}{14}\selectfont\itshape\bfseries}{}{0pt}{}
+\titlespacing*{\section}{0pt}{9pt plus 2pt minus 1pt}{3pt}
+\titlespacing*{\subsection}{0pt}{7pt plus 1pt minus 1pt}{2.5pt}
+\titlespacing*{\subsubsection}{0pt}{5pt}{2pt}
 """
 
 
 def _prepare_pandoc_markdown(md_path: Path) -> str:
-    """Clean Markdown metadata tags for Pandoc while preserving GitHub-compatible source."""
+    """Convert semantic HTML block comments to Pandoc fenced divs while keeping report.md clean on GitHub."""
     text = md_path.read_text(encoding="utf-8")
+    for block_name, div_class in (
+        ("TITLEMETA", "titlemeta"),
+        ("ABSTRACT", "abstract"),
+        ("REFERENCES", "references"),
+    ):
+        text = text.replace(f"<!-- BLOCK:{block_name}:START -->", f"::: {{.{div_class}}}")
+        text = text.replace(f"<!-- BLOCK:{block_name}:END -->", ":::")
     text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
     text = text.replace("<br>", "; ")
     return text
@@ -574,8 +723,65 @@ def _set_xml_font(rpr, font_name: str) -> None:
         rfonts.set(qn(attr), font_name)
 
 
+def _shade_paragraph(paragraph, fill_hex: str) -> None:
+    """Apply subtle academic background shading to a Word paragraph (e.g., Abstract box)."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    ppr = paragraph._p.get_or_add_pPr()
+    for existing in ppr.findall(qn("w:shd")):
+        ppr.remove(existing)
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), fill_hex)
+    ppr.append(shd)
+
+
+def _apply_booktabs_borders(table) -> None:
+    """Format a Word table with three horizontal booktabs rules and zero vertical rules."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl_pr = table._tbl.tblPr
+    for existing in tbl_pr.findall(qn("w:tblBorders")):
+        tbl_pr.remove(existing)
+    borders = OxmlElement("w:tblBorders")
+    for side, val, sz, color in (
+        ("top", "single", "12", "1A202C"),
+        ("bottom", "single", "12", "1A202C"),
+        ("left", "none", "0", "auto"),
+        ("right", "none", "0", "auto"),
+        ("insideH", "none", "0", "auto"),
+        ("insideV", "none", "0", "auto"),
+    ):
+        el = OxmlElement(f"w:{side}")
+        el.set(qn("w:val"), val)
+        if val != "none":
+            el.set(qn("w:sz"), sz)
+            el.set(qn("w:space"), "0")
+            el.set(qn("w:color"), color)
+        borders.append(el)
+    tbl_pr.append(borders)
+
+    # Thin midrule beneath header row
+    if table.rows:
+        for cell in table.rows[0].cells:
+            tc_pr = cell._tc.get_or_add_tcPr()
+            for existing in tc_pr.findall(qn("w:tcBorders")):
+                tc_pr.remove(existing)
+            tc_b = OxmlElement("w:tcBorders")
+            bot = OxmlElement("w:bottom")
+            bot.set(qn("w:val"), "single")
+            bot.set(qn("w:sz"), "6")
+            bot.set(qn("w:space"), "0")
+            bot.set(qn("w:color"), "2D3748")
+            tc_b.append(bot)
+            tc_pr.append(tc_b)
+
+
 def _style_docx_report(docx_path: Path) -> None:
-    """Post-process Pandoc DOCX to enforce Times New Roman 12pt, justified body text, and centered title/figures/tables."""
+    """Post-process Pandoc DOCX to match the Q1 finance journal PDF (Times New Roman 12pt, booktabs tables, shaded Abstract, APA hanging-indent references)."""
     from docx import Document
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -585,18 +791,20 @@ def _style_docx_report(docx_path: Path) -> None:
     doc = Document(str(docx_path))
 
     for sec in doc.sections:
-        sec.top_margin = Inches(0.75)
-        sec.bottom_margin = Inches(0.75)
-        sec.left_margin = Inches(0.75)
-        sec.right_margin = Inches(0.75)
+        sec.top_margin = Inches(0.82)
+        sec.bottom_margin = Inches(0.82)
+        sec.left_margin = Inches(0.82)
+        sec.right_margin = Inches(0.82)
 
-    # Set Times New Roman across document styles
     body_style_names = {"Normal", "Body Text", "First Paragraph", "Compact", "List Paragraph"}
-    heading_sizes = {"Title": 16, "Heading 1": 16, "Heading 2": 14, "Heading 3": 12.5, "Heading 4": 12}
+    heading_sizes = {"Title": 16, "Heading 1": 16, "Heading 2": 13, "Heading 3": 12, "Heading 4": 12}
     for st in doc.styles:
         if not hasattr(st, "font") or st.font is None:
             continue
         if st.name in ("Verbatim Char", "Source Code"):
+            st.font.name = "Courier New"
+            if st._element.rPr is not None:
+                _set_xml_font(st._element.rPr, "Courier New")
             continue
         st.font.name = "Times New Roman"
         if st._element.rPr is not None:
@@ -606,62 +814,144 @@ def _style_docx_report(docx_path: Path) -> None:
             if hasattr(st, "paragraph_format") and st.paragraph_format is not None:
                 st.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 st.paragraph_format.line_spacing = 1.15
-                st.paragraph_format.space_after = Pt(4.5)
+                st.paragraph_format.space_after = Pt(3)
         elif st.name in heading_sizes:
             st.font.size = Pt(heading_sizes[st.name])
             st.font.bold = True
 
-    # Style paragraphs: center main title block, figures, and captions; justify body prose
+    in_abstract = False
+    in_references = False
+    after_heading = True
+    fig_counter = 0
+
     for p in doc.paragraphs:
         sname = p.style.name if p.style else ""
         txt = p.text.strip()
         has_drawing = bool(p._element.findall(".//" + qn("w:drawing")) or p._element.findall(".//" + qn("w:pict")))
-        if sname in ("Heading 1", "Title") or txt.startswith("NATIONAL ECONOMICS UNIVERSITY") or txt.startswith("Course:"):
+
+        if txt == "Abstract":
+            in_abstract = True
+        if sname.startswith("Heading") and "8.1 References" in txt:
+            in_references = True
+        elif sname.startswith("Heading") and in_references:
+            in_references = False
+
+        if sname in ("Heading 1", "Title") or txt.startswith("Quản Hữu Nhật Minh") or txt.startswith("School of Banking") or txt.startswith("Student ID:") or txt.startswith("Repository:"):
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        elif has_drawing or sname in ("Caption", "Image Caption") or txt.startswith("Figure "):
+            p.paragraph_format.first_line_indent = Inches(0)
+            p.paragraph_format.space_after = Pt(2)
+            after_heading = True
+        elif in_abstract:
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            p.paragraph_format.first_line_indent = Inches(0)
+            p.paragraph_format.left_indent = Inches(0.15)
+            p.paragraph_format.right_indent = Inches(0.15)
+            p.paragraph_format.line_spacing = 1.12
+            p.paragraph_format.space_after = Pt(3.5)
+            _shade_paragraph(p, "F3F5F8")
+            for run in p.runs:
+                run.font.size = Pt(11)
+            if "JEL Classification:" in txt:
+                in_abstract = False
+                after_heading = True
+        elif has_drawing:
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.first_line_indent = Inches(0)
+            after_heading = True
+        elif sname in ("Caption", "Image Caption"):
+            fig_counter += 1
+            if not txt.startswith("Figure "):
+                if p.runs:
+                    first_run = p.runs[0]
+                    first_run.text = f"Figure {fig_counter}. " + first_run.text
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.first_line_indent = Inches(0)
+            p.paragraph_format.space_after = Pt(6)
+            for run in p.runs:
+                run.font.size = Pt(10.5)
+            after_heading = True
         elif sname.startswith("Heading"):
             p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            p.paragraph_format.first_line_indent = Inches(0)
+            p.paragraph_format.space_before = Pt(10)
+            p.paragraph_format.space_after = Pt(3)
+            after_heading = True
+        elif in_references and txt:
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            p.paragraph_format.left_indent = Inches(0.35)
+            p.paragraph_format.first_line_indent = Inches(-0.35)
+            p.paragraph_format.line_spacing = 1.12
+            p.paragraph_format.space_after = Pt(3.5)
+            for run in p.runs:
+                run.font.size = Pt(11)
+        elif re.match(r"^Table \d+\.", txt):
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            p.paragraph_format.first_line_indent = Inches(0)
+            p.paragraph_format.space_before = Pt(6)
+            p.paragraph_format.space_after = Pt(2)
+            p.paragraph_format.keep_with_next = True
+            for run in p.runs:
+                run.font.size = Pt(11)
+            after_heading = True
+        elif txt.startswith("Note(s):") or txt.startswith("AI Tool Disclosure:"):
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            p.paragraph_format.first_line_indent = Inches(0)
+            p.paragraph_format.space_before = Pt(2)
+            p.paragraph_format.space_after = Pt(6)
+            for run in p.runs:
+                run.font.size = Pt(10)
+            after_heading = True
         elif sname not in ("Source Code",):
             p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             p.paragraph_format.line_spacing = 1.15
+            p.paragraph_format.space_after = Pt(3)
+            p.paragraph_format.first_line_indent = Inches(0) if after_heading else Inches(0.25)
+            after_heading = False
 
-        # Normalize run font family (keep inline code monospace and OMML math intact)
         for run in p.runs:
             rstyle = run.style.name if run.style else ""
             if rstyle in ("Verbatim Char", "Source Code"):
-                run.font.size = Pt(10.5)
+                run.font.name = "Courier New"
+                _set_xml_font(run._r.get_or_add_rPr(), "Courier New")
+                run.font.size = Pt(9.5)
+                run.font.bold = False
                 continue
             run.font.name = "Times New Roman"
             _set_xml_font(run._r.get_or_add_rPr(), "Times New Roman")
-            if sname in body_style_names or sname == "":
-                if run.font.size is None:
-                    run.font.size = Pt(12)
+            if (sname in body_style_names or sname == "") and run.font.size is None:
+                run.font.size = Pt(12)
 
-    # Center tables and enforce Times New Roman inside cells
     for tbl in doc.tables:
         tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+        _apply_booktabs_borders(tbl)
         ncols = len(tbl.columns)
-        cell_pt = Pt(9.5) if ncols >= 6 else Pt(10.5)
-        for row in tbl.rows:
+        cell_pt = Pt(9.5) if ncols >= 7 else Pt(10.5)
+        for r_idx, row in enumerate(tbl.rows):
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    p.paragraph_format.line_spacing = 1.05
+                    p.paragraph_format.line_spacing = 1.08
+                    p.paragraph_format.space_before = Pt(1.5)
                     p.paragraph_format.space_after = Pt(1.5)
+                    p.paragraph_format.first_line_indent = Inches(0)
                     for run in p.runs:
                         rstyle = run.style.name if run.style else ""
                         if rstyle in ("Verbatim Char", "Source Code"):
-                            run.font.size = Pt(8.5 if ncols >= 6 else 9.5)
+                            run.font.name = "Courier New"
+                            _set_xml_font(run._r.get_or_add_rPr(), "Courier New")
+                            run.font.size = Pt(8.5 if ncols >= 7 else 9.0)
+                            run.font.bold = False
                             continue
                         run.font.name = "Times New Roman"
                         _set_xml_font(run._r.get_or_add_rPr(), "Times New Roman")
                         run.font.size = cell_pt
+                        if r_idx == 0:
+                            run.font.bold = True
 
     doc.save(str(docx_path))
 
 
 def build_report_pdf_and_docx(md_path: Path) -> Path:
-    """Render report.md to native LaTeX PDF (Times New Roman 12pt) and styled Word DOCX (native OMML math)."""
+    """Render report.md to Q1-journal LaTeX PDF (Times New Roman 12pt + TeX Gyre Termes Math) and styled DOCX."""
     pdf_path = md_path.parent / "BFT65B_Final_Report.pdf"
     docx_path = md_path.parent / "BFT65B_Final_Report.docx"
     resource_path = f"{md_path.parent}:{out_dir('figures')}"
@@ -679,30 +969,33 @@ def build_report_pdf_and_docx(md_path: Path) -> Path:
             [
                 "pandoc",
                 str(clean_md),
-                "--from=gfm+tex_math_dollars+implicit_figures",
+                "--from=gfm+tex_math_dollars+implicit_figures+fenced_divs",
                 "--pdf-engine=xelatex",
                 f"--lua-filter={lua_filter}",
                 f"--include-in-header={preamble}",
                 f"--resource-path={resource_path}",
+                "-V", "indent=true",
                 "-V", "geometry:margin=0.72in",
                 "-V", "fontsize=12pt",
                 "-V", "mainfont=Times New Roman",
                 "-V", "sansfont=Times New Roman",
-                "-V", "monofont=Noto Sans Mono",
+                "-V", "mathfont=texgyretermes-math.otf",
+                "-V", "monofont=Courier New",
+                "-V", "monofontoptions=Scale=0.82",
                 "-V", "colorlinks=true",
-                "-V", "linkcolor=blue",
-                "-V", "urlcolor=blue",
+                "-V", "linkcolor=journalblue",
+                "-V", "urlcolor=journalblue",
                 "-o", str(pdf_path),
             ],
             check=True,
         )
-        log.info(f"Compiled LaTeX PDF report (Times New Roman 12pt) via Pandoc + XeLaTeX to {pdf_path}")
+        log.info(f"Compiled Q1-journal LaTeX PDF report (Times New Roman 12pt + TeX Gyre Termes Math) to {pdf_path}")
 
         subprocess.run(
             [
                 "pandoc",
                 str(clean_md),
-                "--from=gfm+tex_math_dollars+implicit_figures",
+                "--from=gfm+tex_math_dollars+implicit_figures+fenced_divs",
                 f"--lua-filter={lua_filter}",
                 f"--resource-path={resource_path}",
                 "-o", str(docx_path),
@@ -710,7 +1003,7 @@ def build_report_pdf_and_docx(md_path: Path) -> Path:
             check=True,
         )
         _style_docx_report(docx_path)
-        log.info(f"Compiled and styled Word DOCX (Times New Roman 12pt, justify + center) to {docx_path}")
+        log.info(f"Compiled and styled Q1-journal Word DOCX (Times New Roman 12pt, booktabs, shaded Abstract) to {docx_path}")
 
     return pdf_path
 

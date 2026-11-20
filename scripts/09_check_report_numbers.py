@@ -163,8 +163,17 @@ def main() -> None:
         raise AssertionError(f"Found unrendered LaTeX markup in compiled PDF: {raw_latex_leaks}")
 
     fonts_out = subprocess.run(["pdffonts", str(pdf_path)], check=True, capture_output=True, text=True).stdout
-    if "timesnewroman" not in fonts_out.lower():
+    fonts_lower = fonts_out.lower()
+    if "timesnewroman" not in fonts_lower:
         raise AssertionError(f"Expected Times New Roman embedded in compiled PDF; pdffonts:\n{fonts_out}")
+    if "texgyretermesmath" not in fonts_lower:
+        raise AssertionError(f"Expected TeX Gyre Termes Math embedded in compiled PDF; pdffonts:\n{fonts_out}")
+    if "notosansmono" in fonts_lower:
+        raise AssertionError(f"Found unexpected heavy NotoSansMono font in Q1-styled PDF; pdffonts:\n{fonts_out}")
+
+    backtick_nums = re.findall(r"`[\$~\+\-]?\d[\d,\.%kMGBsdx/\-\s]*`", report_txt)
+    if backtick_nums:
+        raise AssertionError(f"Found backtick-wrapped numeric tokens in report.md (violates Q1 typography): {backtick_nums[:10]}")
 
     docx_path = ROOT / "report" / "BFT65B_Final_Report.docx"
     if not docx_path.exists():
