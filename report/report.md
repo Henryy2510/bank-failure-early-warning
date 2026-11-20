@@ -41,10 +41,10 @@ Central bank banking supervision departments require an early-warning system (EW
 ## 2. Part 1: Data Acquisition & Storage Architecture [15 pts]
 
 ### 2.1 Field Selection & Reproducible Acquisition
-The pipeline ingests three relational tables linked by FDIC certificate number (`CERT`): **`Financials`** (`1,682,616` rows, `170` quarters `1984Q1–2026Q2`, `3` keys + `30` CAMELS fields spanning capital, liquidity, loans, delinquency, and earnings), **`Failures`** (`4,117` events since 1934), and **`Institutions`** (`27,835` records). Newer fields absent prior to 1994/2017 (`DEPUNINS`, `SCHA`/`SCHF`) are excluded from training features to prevent historical availability bias across 1984–1993 (`Section 7.1`). Offline verification (`scripts/00_download.py`) confirms `170/170` complete quarters matching API totals with `0` duplicate keys.
+The pipeline ingests three relational tables linked by FDIC certificate number (`CERT`): **`Financials`** (`1,682,616` rows, `170` quarters `1984Q1–2026Q2`, `3` keys + `30` CAMELS fields spanning capital, liquidity, loans, delinquency, and earnings), **`Failures`** (`4,117` events since 1934), and **`Institutions`** (`27,835` records). Newer fields absent prior to 1994/2017 (`DEPUNINS`, `SCHA`/`SCHF`) are excluded from training features to prevent historical availability bias across 1984–1993 (`Section 7.1`). Acquisition (`scripts/00_download.py --download` / `fdic_download_starter.py`) is fully **resumable**: each quarter writes atomically only after matching API metadata totals in `manifest_financials.json`, skips already-verified quarters on restart, and retries HTTP `429`/`5xx` errors with exponential backoff. Offline verification (`--verify-only`) confirms `170/170` complete quarters with `0` duplicate keys.
 
 ### 2.2 Storage Layout Design, Float64 Precision Audit & Empirical Benchmarks
-We design the **Bronze Layer (`data/bronze/financials`)** with explicit Arrow typing (`Int32 CERT`, `Date32 REPDTE`, dictionary `STNAME`, `Float64` measures), **Hive `YEAR=YYYY` partitioning** (`43` directories instead of `170` small files), `(REPDTE, CERT)` intra-partition sorting (`row_group_size = 50,000`), and **Zstandard level 3** compression.
+We design the **Bronze Layer (`data/bronze/financials`)** with explicit Arrow typing (`Int32 CERT`, `Date32 REPDTE`, dictionary `STNAME`, `Float64` measures), **Hive `YEAR=YYYY` partitioning** (`43` directories averaging `~3.6 MB`/file instead of `170` small `<1 MB` quarterly files that inflate file-listing metadata overhead), `(REPDTE, CERT)` intra-partition sorting (`row_group_size = 50,000`), and **Zstandard level 3** compression.
 
 **Why `Float64` Rather Than `Float32` (`outputs/tables/part1_float32_check.csv`):** Because IEEE-754 `Float32` preserves exact integers only up to $2^{24} = 16,777,216$ (`~$16.8B`), **`11,485` `ASSET` rows** (max `$4.09T`), **`8,706` `DEP` rows**, and **`1,652` `EQ` rows** exceed exact integer representation—inducing quantization rounding errors up to **`$128k` on `ASSET`** and **`$120k` on `DEP`**, justifying `Float64` retention in `SCHEMA`.
 
@@ -199,6 +199,8 @@ In real central-bank supervision, early-warning scores are deployed under two co
 | **`$250k` (Baseline)** | **`0.0039`** | **`False`** | **`88`** | **`8,083`** | **`96.70%`** | **`2.883%`** | **`43.0`** |
 | **`$500k`** | `0.0039` | `False` | `88` | `8,083` | `96.70%` | `2.883%` | `43.0` |
 | **`$1,000k`** | `0.0139` | `False` | `150` | `4,383` | `95.67%` | `1.700%` | `26.5` |
+
+*Note: Table 6.3 evaluates rounded 4-decimal grid cutoffs ($\theta = 0.0039 \rightarrow 2.883\%$), whereas Table 6.4 evaluates the exact unrounded log-grid point ($\theta^* = 0.003864 \rightarrow 2.894\%$, differing by 43 of 400,332 test rows).*
 
 ### 6.4 Evaluation on Held-Out `TEST` (`2009Q1–2025Q2`) & Live `2026Q2` Operational Watchlist
 Scoring the `DEV`-trained Champion `HistGradientBoosting` pipeline on `400,332` held-out test bank-quarters (`485` failing banks, `1,409` pre-failure quarters) yields (`outputs/tables/test_results.json`):

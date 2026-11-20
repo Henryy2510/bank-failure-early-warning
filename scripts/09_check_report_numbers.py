@@ -162,6 +162,34 @@ def main() -> None:
     if raw_latex_leaks:
         raise AssertionError(f"Found unrendered LaTeX markup in compiled PDF: {raw_latex_leaks}")
 
+    fonts_out = subprocess.run(["pdffonts", str(pdf_path)], check=True, capture_output=True, text=True).stdout
+    if "timesnewroman" not in fonts_out.lower():
+        raise AssertionError(f"Expected Times New Roman embedded in compiled PDF; pdffonts:\n{fonts_out}")
+
+    docx_path = ROOT / "report" / "BFT65B_Final_Report.docx"
+    if not docx_path.exists():
+        raise AssertionError(f"Missing compiled DOCX: {docx_path}")
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+
+    doc = Document(str(docx_path))
+    normal_st = doc.styles["Normal"]
+    if normal_st.font.name != "Times New Roman" or normal_st.font.size != Pt(12):
+        raise AssertionError(
+            f"DOCX Normal style mismatch: font={normal_st.font.name}, size={normal_st.font.size}"
+        )
+    if doc.paragraphs[0].alignment != WD_ALIGN_PARAGRAPH.CENTER:
+        raise AssertionError("DOCX main title paragraph is not centered")
+    justified_body = sum(
+        1 for p in doc.paragraphs
+        if (p.style and p.style.name in ("Body Text", "First Paragraph", "Normal"))
+        and len(p.text.strip()) > 80
+        and p.alignment == WD_ALIGN_PARAGRAPH.JUSTIFY
+    )
+    if justified_body < 10:
+        raise AssertionError(f"Expected justified body paragraphs in DOCX, found only {justified_body}")
+
     # 4. Forbidden stale numbers in report.md and README.md
     stale_tokens = [
         "0.3990",

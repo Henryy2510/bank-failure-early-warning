@@ -493,9 +493,32 @@ function Table(tbl)
   return tbl
 end
 
+function Header(el)
+  if FORMAT:match "latex" and el.level == 1 then
+    return {
+      pandoc.RawBlock("latex", "\\begin{center}\\Large\\bfseries " .. pandoc.utils.stringify(el) .. "\\end{center}"),
+    }
+  end
+  return el
+end
+
+function Para(el)
+  if FORMAT:match "latex" then
+    local txt = pandoc.utils.stringify(el)
+    if txt:find("^NATIONAL ECONOMICS UNIVERSITY") then
+      return {
+        pandoc.RawBlock("latex", "\\begin{center}"),
+        el,
+        pandoc.RawBlock("latex", "\\end{center}"),
+      }
+    end
+  end
+  return el
+end
+
 function Image(img)
   if FORMAT:match "latex" then
-    img.attributes["width"] = "90%"
+    img.attributes["width"] = "88%"
   elseif FORMAT:match "docx" then
     img.attributes["width"] = "5.8in"
   end
@@ -512,10 +535,10 @@ _XELATEX_PREAMBLE = r"""
 \usepackage{xurl}
 \usepackage{fancyhdr}
 \usepackage{caption}
-\captionsetup{font={small,it},labelfont=bf}
+\captionsetup{font={small,it},labelfont=bf,justification=centering}
 \linespread{1.15}
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{5pt}
+\setlength{\parskip}{4.5pt}
 \emergencystretch=3em
 \pagestyle{fancy}
 \fancyhf{}
@@ -524,9 +547,9 @@ _XELATEX_PREAMBLE = r"""
 \cfoot{\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
 \usepackage{titlesec}
-\titlespacing*{\section}{0pt}{12pt}{5pt}
-\titlespacing*{\subsection}{0pt}{9pt}{3.5pt}
-\titlespacing*{\subsubsection}{0pt}{7pt}{2.5pt}
+\titlespacing*{\section}{0pt}{11pt}{4pt}
+\titlespacing*{\subsection}{0pt}{8pt}{3pt}
+\titlespacing*{\subsubsection}{0pt}{6pt}{2pt}
 """
 
 
@@ -538,8 +561,107 @@ def _prepare_pandoc_markdown(md_path: Path) -> str:
     return text
 
 
+def _set_xml_font(rpr, font_name: str) -> None:
+    """Ensure Word sets ASCII, HAnsi, EastAsia, and CS fonts consistently."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    rfonts = rpr.find(qn("w:rFonts"))
+    if rfonts is None:
+        rfonts = OxmlElement("w:rFonts")
+        rpr.insert(0, rfonts)
+    for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
+        rfonts.set(qn(attr), font_name)
+
+
+def _style_docx_report(docx_path: Path) -> None:
+    """Post-process Pandoc DOCX to enforce Times New Roman 12pt, justified body text, and centered title/figures/tables."""
+    from docx import Document
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.shared import Inches, Pt
+
+    doc = Document(str(docx_path))
+
+    for sec in doc.sections:
+        sec.top_margin = Inches(0.75)
+        sec.bottom_margin = Inches(0.75)
+        sec.left_margin = Inches(0.75)
+        sec.right_margin = Inches(0.75)
+
+    # Set Times New Roman across document styles
+    body_style_names = {"Normal", "Body Text", "First Paragraph", "Compact", "List Paragraph"}
+    heading_sizes = {"Title": 16, "Heading 1": 16, "Heading 2": 14, "Heading 3": 12.5, "Heading 4": 12}
+    for st in doc.styles:
+        if not hasattr(st, "font") or st.font is None:
+            continue
+        if st.name in ("Verbatim Char", "Source Code"):
+            continue
+        st.font.name = "Times New Roman"
+        if st._element.rPr is not None:
+            _set_xml_font(st._element.rPr, "Times New Roman")
+        if st.name in body_style_names:
+            st.font.size = Pt(12)
+            if hasattr(st, "paragraph_format") and st.paragraph_format is not None:
+                st.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                st.paragraph_format.line_spacing = 1.15
+                st.paragraph_format.space_after = Pt(4.5)
+        elif st.name in heading_sizes:
+            st.font.size = Pt(heading_sizes[st.name])
+            st.font.bold = True
+
+    # Style paragraphs: center main title block, figures, and captions; justify body prose
+    for p in doc.paragraphs:
+        sname = p.style.name if p.style else ""
+        txt = p.text.strip()
+        has_drawing = bool(p._element.findall(".//" + qn("w:drawing")) or p._element.findall(".//" + qn("w:pict")))
+        if sname in ("Heading 1", "Title") or txt.startswith("NATIONAL ECONOMICS UNIVERSITY") or txt.startswith("Course:"):
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        elif has_drawing or sname in ("Caption", "Image Caption") or txt.startswith("Figure "):
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        elif sname.startswith("Heading"):
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        elif sname not in ("Source Code",):
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            p.paragraph_format.line_spacing = 1.15
+
+        # Normalize run font family (keep inline code monospace and OMML math intact)
+        for run in p.runs:
+            rstyle = run.style.name if run.style else ""
+            if rstyle in ("Verbatim Char", "Source Code"):
+                run.font.size = Pt(10.5)
+                continue
+            run.font.name = "Times New Roman"
+            _set_xml_font(run._r.get_or_add_rPr(), "Times New Roman")
+            if sname in body_style_names or sname == "":
+                if run.font.size is None:
+                    run.font.size = Pt(12)
+
+    # Center tables and enforce Times New Roman inside cells
+    for tbl in doc.tables:
+        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+        ncols = len(tbl.columns)
+        cell_pt = Pt(9.5) if ncols >= 6 else Pt(10.5)
+        for row in tbl.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    p.paragraph_format.line_spacing = 1.05
+                    p.paragraph_format.space_after = Pt(1.5)
+                    for run in p.runs:
+                        rstyle = run.style.name if run.style else ""
+                        if rstyle in ("Verbatim Char", "Source Code"):
+                            run.font.size = Pt(8.5 if ncols >= 6 else 9.5)
+                            continue
+                        run.font.name = "Times New Roman"
+                        _set_xml_font(run._r.get_or_add_rPr(), "Times New Roman")
+                        run.font.size = cell_pt
+
+    doc.save(str(docx_path))
+
+
 def build_report_pdf_and_docx(md_path: Path) -> Path:
-    """Render report.md to native LaTeX PDF (via Pandoc + XeLaTeX) and Word DOCX (native OMML math)."""
+    """Render report.md to native LaTeX PDF (Times New Roman 12pt) and styled Word DOCX (native OMML math)."""
     pdf_path = md_path.parent / "BFT65B_Final_Report.pdf"
     docx_path = md_path.parent / "BFT65B_Final_Report.docx"
     resource_path = f"{md_path.parent}:{out_dir('figures')}"
@@ -563,9 +685,9 @@ def build_report_pdf_and_docx(md_path: Path) -> Path:
                 f"--include-in-header={preamble}",
                 f"--resource-path={resource_path}",
                 "-V", "geometry:margin=0.72in",
-                "-V", "fontsize=11pt",
-                "-V", "mainfont=Noto Serif",
-                "-V", "sansfont=Noto Sans",
+                "-V", "fontsize=12pt",
+                "-V", "mainfont=Times New Roman",
+                "-V", "sansfont=Times New Roman",
                 "-V", "monofont=Noto Sans Mono",
                 "-V", "colorlinks=true",
                 "-V", "linkcolor=blue",
@@ -574,7 +696,7 @@ def build_report_pdf_and_docx(md_path: Path) -> Path:
             ],
             check=True,
         )
-        log.info(f"Compiled LaTeX PDF report via Pandoc + XeLaTeX to {pdf_path}")
+        log.info(f"Compiled LaTeX PDF report (Times New Roman 12pt) via Pandoc + XeLaTeX to {pdf_path}")
 
         subprocess.run(
             [
@@ -587,7 +709,8 @@ def build_report_pdf_and_docx(md_path: Path) -> Path:
             ],
             check=True,
         )
-        log.info(f"Compiled Word DOCX (native math) report via Pandoc to {docx_path}")
+        _style_docx_report(docx_path)
+        log.info(f"Compiled and styled Word DOCX (Times New Roman 12pt, justify + center) to {docx_path}")
 
     return pdf_path
 
