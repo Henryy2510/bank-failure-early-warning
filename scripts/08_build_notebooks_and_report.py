@@ -567,13 +567,16 @@ function Header(el)
   if FORMAT:match "latex" then
     if el.level == 1 then
       return {
-        pandoc.RawBlock("latex", "\\thispagestyle{firstpage}\\vspace*{-0.35em}\\begin{center}{\\fontsize{15.5}{19}\\selectfont\\bfseries " .. pandoc.utils.stringify(el) .. "}\\end{center}\\vspace{0.2em}"),
+        pandoc.RawBlock("latex", "\\thispagestyle{firstpage}\\vspace*{0.35in}\\begin{center}{\\fontsize{16}{21}\\selectfont\\bfseries " .. pandoc.utils.stringify(el) .. "}\\end{center}\\vspace{0.35em}"),
       }
-    elseif el.level == 2 and pandoc.utils.stringify(el):match("^Appendix:") then
-      return {
-        pandoc.RawBlock("latex", "\\clearpage"),
-        el,
-      }
+    elseif el.level == 2 then
+      local txt = pandoc.utils.stringify(el)
+      if txt:match("^1%.%s+Introduction") or txt:match("^Appendix:") then
+        return {
+          pandoc.RawBlock("latex", "\\clearpage"),
+          el,
+        }
+      end
     end
   end
   return el
@@ -882,6 +885,8 @@ def _style_docx_report(docx_path: Path) -> None:
             p.paragraph_format.first_line_indent = Inches(0)
             p.paragraph_format.space_before = Pt(10)
             p.paragraph_format.space_after = Pt(3)
+            if txt.startswith("1. Introduction") or txt.startswith("Appendix:"):
+                p.paragraph_format.page_break_before = True
             after_heading = True
         elif in_references and txt:
             p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -959,8 +964,8 @@ def _style_docx_report(docx_path: Path) -> None:
 
 def build_report_pdf_and_docx(md_path: Path) -> Path:
     """Render report.md to Q1-journal LaTeX PDF (Times New Roman 12pt + TeX Gyre Termes Math) and styled DOCX."""
-    pdf_path = md_path.parent / "BFT65B_Final_Report.pdf"
-    docx_path = md_path.parent / "BFT65B_Final_Report.docx"
+    pdf_path = md_path.parent / "QuanHuuNhatMinh_11230998_Final_Report.pdf"
+    docx_path = md_path.parent / "QuanHuuNhatMinh_11230998_Final_Report.docx"
     resource_path = f"{md_path.parent}:{out_dir('figures')}"
 
     with tempfile.TemporaryDirectory(prefix="bfews_pandoc_") as tmpdir:

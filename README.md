@@ -87,8 +87,8 @@ final/
 │   └── tables/                        # Multi-scale & Spark benchmarks (local[2] & local[4]), Float32/CBLR/YTD/CHANGEC1 audits, leakage shift, cfp_stability_interval, frozen_protocol, watchlist_2026q2, test_results
 ├── report/                            # Final Research Report deliverables
 │   ├── report.md                      # Full English report in GitHub Markdown
-│   ├── BFT65B_Final_Report.docx       # Formatted Word document with embedded tables and figures
-│   └── BFT65B_Final_Report.pdf        # Final PDF report (<= 20 pages)
+│   ├── QuanHuuNhatMinh_11230998_Final_Report.docx       # Formatted Word document with embedded tables and figures
+│   └── QuanHuuNhatMinh_11230998_Final_Report.pdf        # Final PDF report (<= 20 pages)
 └── tests/
     └── test_pipeline.py               # Automated pytest suite (20 tests: completeness, de-YTD, CBLR zero-fix, forbidden cols, post-failure filter, CV purge, leakage invariance, C_FP stability interval, frozen_protocol manifest, Spark local[2]/local[4] parity, non-degenerate cost threshold, README paths, PDF pages)
 ```
@@ -135,7 +135,7 @@ This script runs Steps `00` through `09`, logs per-step wall-clock times to `out
 * **Step 5 (`05_benchmark.py`):** Benchmarks Polars vs. Pandas across `1x–8x` (`1.68M–13.46M` rows) and dumps `outputs/tables/polars_naive_vs_optimized_plan.txt` & `benchmark_environment.json`.
 * **Step 6 (`06_spark.py`):** Runs PySpark pipeline, verifies `0.0` discrepancy against Polars, measures `1x & 4x` Python+JVM tree RSS (`spark_scaling_results.csv`), dumps `spark_execution_plan.txt`, and runs the Spark MLlib demo.
 * **Step 7 (`07_model.py`):** Runs 5-fold expanding walk-forward CV on `DEV` (`760,559` OOF rows, `1,522` OOF failing banks; `2,661` total `DEV` failing banks), audits leakage shifts & `FAILURE`-only label sensitivity, calibrates cost-optimal threshold ($\theta^* = 0.0039$), computes capacity budgets (`Top 1%, 2%, 5%`), evaluates once on `TEST`, scores `2026Q2` live operational watchlist (`watchlist_2026q2.csv`), and plots curves & trajectories.
-* **Step 8 (`08_build_notebooks_and_report.py`):** Executes `notebooks/*.ipynb` via `nbclient` and regenerates `report/BFT65B_Final_Report.docx` and `.pdf`.
+* **Step 8 (`08_build_notebooks_and_report.py`):** Executes `notebooks/*.ipynb` via `nbclient` and regenerates `report/QuanHuuNhatMinh_11230998_Final_Report.docx` and `.pdf`.
 * **Step 9 (`09_check_report_numbers.py`):** Verifies that all key metrics in `report/report.md` and `README.md` match the generated JSON/CSV files.
 * **Tests (`pytest tests/`):** Runs 20 automated unit/integration tests verifying manifest completeness, YTD de-cumulation, CBLR zero recoding & negative stock sanitization, forbidden outcome column exclusion, zero post-failure Gold rows, strict CV purges, preprocessor leakage invariance, `cfp_stability_interval.json` linear-cost decomposition, `frozen_protocol.json` audit manifest SHA-256 fingerprints, Polars–PySpark parity (`local[2]` & `local[4]`), non-degenerate cost threshold, capacity points, explainability, Canary studies, upgraded artifacts, README script paths, and the 20-page PDF limit.
 

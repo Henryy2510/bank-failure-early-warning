@@ -147,7 +147,7 @@ def main() -> None:
         raise AssertionError(f"Missing expected tokens in README.md: {missing_readme}")
 
     # 3. Verify compiled PDF exists and stays within the 20-page limit
-    pdf_path = ROOT / "report" / "BFT65B_Final_Report.pdf"
+    pdf_path = ROOT / "report" / "QuanHuuNhatMinh_11230998_Final_Report.pdf"
     if not pdf_path.exists():
         raise AssertionError(f"Missing compiled PDF: {pdf_path}")
     info = subprocess.run(["pdfinfo", str(pdf_path)], check=True, capture_output=True, text=True).stdout
@@ -175,7 +175,7 @@ def main() -> None:
     if backtick_nums:
         raise AssertionError(f"Found backtick-wrapped numeric tokens in report.md (violates Q1 typography): {backtick_nums[:10]}")
 
-    docx_path = ROOT / "report" / "BFT65B_Final_Report.docx"
+    docx_path = ROOT / "report" / "QuanHuuNhatMinh_11230998_Final_Report.docx"
     if not docx_path.exists():
         raise AssertionError(f"Missing compiled DOCX: {docx_path}")
     from docx import Document

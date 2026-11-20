@@ -122,7 +122,7 @@ def run_float32_precision_check(df: pl.DataFrame) -> pl.DataFrame:
 
 def plot_storage(res: pl.DataFrame) -> None:
     d = res.filter(pl.col("format").str.starts_with("pandas").not_()).to_pandas()
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4.2))
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(12, 4.2))
     a1.barh(d["format"], d["size_mb"], color=["#d9534f", "#f0ad4e", "#5bc0de", "#5cb85c"])
     a1.set_xlabel("size on disk (MB)")
     a1.set_title("Storage footprint (1.68M rows)")

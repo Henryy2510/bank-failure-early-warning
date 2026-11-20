@@ -22,21 +22,6 @@ Repository: [https://github.com/Henryy2510/big-data-financial-analyst](https://g
 **JEL Classification:** G21, G28, C53, C55
 <!-- BLOCK:ABSTRACT:END -->
 
-**Table 1.** Data coverage, temporal sample splits, and reproducibility scope.
-
-| Attribute | Scope and Quantitative Specification |
-| :--- | :--- |
-| Data Source and Acquisition | FDIC BankFind Suite Public REST API (`https://api.fdic.gov/banks`) via resumable Python client (`scripts/00_download.py`); verified against API totals on 2026-11-05 |
-| Raw Relational Tables | Financials: 1,682,616 bank-quarters (170 quarters, 1984Q1–2026Q2, 24,064 distinct CERTs, 0 duplicate keys); Failures: 4,117 historical resolutions (3,275 in 1984–2026; 3,211 matched to active panel CERTs); Institutions: 27,835 structural bank records |
-| Development Sample (DEV) | 1984Q1–2007Q4 (96 quarters): 1,224,815 rows (1,223,542 pit-scorable), 23,776 banks, 2,661 pit-scorable failing banks (1,522 failing banks in 5 walk-forward OOF blocks covering 760,559 rows), 8,844 pre-failure quarters ($y_{i,q}=1$, base rate 0.723%) |
-| Purge / Embargo Gap (PURGE) | 2008Q1–2008Q4 (4 quarters): 33,966 rows (33,922 pit-scorable) enforcing a strict 4-quarter embargo so no development forward label overlaps the test window |
-| Held-Out Test Set (TEST) | 2009Q1–2025Q2 (66 quarters): 400,698 rows (400,332 pit-scorable), 8,451 banks, 485 failing banks, 1,409 pre-failure quarters ($y_{i,q}=1$, base rate 0.352%; spans the 2009–2014 Global Financial Crisis and 2023 stress) |
-| Right-Censored Tail (POST\_SAMPLE) | 2025Q3–2026Q2 (4 quarters): 17,501 rows (4,306 pit-scorable active banks in 2026Q2) excluded from supervised training and testing; scored operationally at 2026-06-30 by the frozen DEV model |
-
-*Note(s):* All raw acquisition checksums and API row-count reconciliations are logged in `manifest_financials.json`, `outputs/tables/gold_split_summary.csv`, and `outputs/tables/frozen_protocol.json`.
-
----
-
 ## 1. Introduction
 
 Banking supervision agencies rely on continuous early-warning systems (EWS) to prioritize scarce on-site examination capacity and resolve distressed depository institutions before losses compound on the deposit insurance fund. Prior empirical research confirms that accounting-based CAMELS indicators carry strong predictive power for U.S. bank insolvencies (Wheelock & Wilson, 2000; Shumway, 2001; Cole & White, 2012). Yet translating historical supervisory filings into a production-grade EWS is predominantly a big-data engineering and temporal-integrity challenge: four decades of quarterly regulatory reports suffer from evolving form schemas, regime-specific zero-coding conventions, cumulative income flows, competing merger exits, and publication delays that routinely invalidate naive machine-learning pipelines.
@@ -53,13 +38,24 @@ With respect to the third research question—whether the resulting panel suppor
 
 The remainder of this study is organized as follows. Section 2 details data acquisition, schema precision auditing, and lakehouse storage benchmarks. Section 3 presents the automated data-quality audit and point-in-time panel construction. Section 4 benchmarks Polars, Pandas, and PySpark across 1x–8x data scales and establishes the cluster-justification boundary. Section 5 describes leak-free CAMELS feature engineering and empirical anti-leakage verification. Section 6 reports walk-forward model comparison, cost-sensitive thresholding, held-out test evaluation, supervisory explainability, and historical canary diagnostics. Section 7 discusses limitations and institutional adaptations required for the State Bank of Vietnam.
 
----
-
 ## 2. Data Acquisition and Lakehouse Storage Architecture
 
 ### 2.1 Field Selection and Reproducible Acquisition
 
-The ingestion pipeline retrieves three relational FDIC tables keyed by certificate number (CERT): Financials (1,682,616 bank-quarter rows across 170 quarters from 1984Q1 through 2026Q2, comprising 3 identifiers and 30 CAMELS financial fields spanning capital, asset quality, liquidity, loan composition, and earnings), Failures (4,117 historical resolution records since 1934), and Institutions (27,835 structural bank records). Fields introduced only after 1994 or 2017—such as uninsured deposits (DEPUNINS) and held-to-maturity securities schedules (SCHA and SCHF)—are intentionally omitted from the uniform 42-year training schema to prevent historical availability bias across 1984–1993, and their omission is revisited in Section 7.1.
+The ingestion pipeline retrieves three relational FDIC tables keyed by certificate number (CERT): Financials (1,682,616 bank-quarter rows across 170 quarters from 1984Q1 through 2026Q2, comprising 3 identifiers and 30 CAMELS financial fields spanning capital, asset quality, liquidity, loan composition, and earnings), Failures (4,117 historical resolution records since 1934), and Institutions (27,835 structural bank records). Fields introduced only after 1994 or 2017—such as uninsured deposits (DEPUNINS) and held-to-maturity securities schedules (SCHA and SCHF)—are intentionally omitted from the uniform 42-year training schema to prevent historical availability bias across 1984–1993, and their omission is revisited in Section 7.1. Table 1 summarizes the dataset coverage, temporal sample splits, and reproducibility scope across all three relational tables.
+
+**Table 1.** Data coverage, temporal sample splits, and reproducibility scope.
+
+| Attribute | Scope and Quantitative Specification |
+| :--- | :--- |
+| Data Source and Acquisition | FDIC BankFind Suite Public REST API (`https://api.fdic.gov/banks`) via resumable Python client (`scripts/00_download.py`); verified against API totals on 2026-11-05 |
+| Raw Relational Tables | Financials: 1,682,616 bank-quarters (170 quarters, 1984Q1–2026Q2, 24,064 distinct CERTs, 0 duplicate keys); Failures: 4,117 historical resolutions (3,275 in 1984–2026; 3,211 matched to active panel CERTs); Institutions: 27,835 structural bank records |
+| Development Sample (DEV) | 1984Q1–2007Q4 (96 quarters): 1,224,815 rows (1,223,542 pit-scorable), 23,776 banks, 2,661 pit-scorable failing banks (1,522 failing banks in 5 walk-forward OOF blocks covering 760,559 rows), 8,844 pre-failure quarters ($y_{i,q}=1$, base rate 0.723%) |
+| Purge / Embargo Gap (PURGE) | 2008Q1–2008Q4 (4 quarters): 33,966 rows (33,922 pit-scorable) enforcing a strict 4-quarter embargo so no development forward label overlaps the test window |
+| Held-Out Test Set (TEST) | 2009Q1–2025Q2 (66 quarters): 400,698 rows (400,332 pit-scorable), 8,451 banks, 485 failing banks, 1,409 pre-failure quarters ($y_{i,q}=1$, base rate 0.352%; spans the 2009–2014 Global Financial Crisis and 2023 stress) |
+| Right-Censored Tail (POST\_SAMPLE) | 2025Q3–2026Q2 (4 quarters): 17,501 rows (4,306 pit-scorable active banks in 2026Q2) excluded from supervised training and testing; scored operationally at 2026-06-30 by the frozen DEV model |
+
+*Note(s):* All raw acquisition checksums and API row-count reconciliations are logged in `manifest_financials.json`, `outputs/tables/gold_split_summary.csv`, and `outputs/tables/frozen_protocol.json`.
 
 Acquisition is implemented as a fully resumable client (`scripts/00_download.py --download`, adapted from the course starter script). Each quarterly request paginates deterministically by CERT, verifies the returned row count against the API's reported metadata total before atomically writing the quarterly file, records completion status in `manifest_financials.json`, skips already-verified quarters upon restart, and retries transient HTTP 429 or 5xx responses with exponential backoff. Offline verification (`--verify-only`) confirms 170 of 170 complete quarters with zero duplicate (CERT, REPDTE) primary keys.
 
@@ -86,8 +82,6 @@ Retaining Float64 rather than downcasting monetary balances to Float32 is empiri
 As reported in Table 2 and illustrated in Figure 1, Hive-partitioned Zstandard Parquet reduces disk footprint by 2.76x relative to raw CSV (154.1 MB vs. 425.7 MB) with negligible metadata overhead over single-file Zstandard (0.3 MB), while accelerating 3-column projections by 5.2x (0.042 s vs. 0.220 s) and single-year temporal slices by 24.7x (0.040 s vs. 0.988 s) through partition pruning.
 
 ![Storage layout, compression ratio, and query-latency benchmark across raw CSV, Snappy, Zstandard, and Hive-partitioned Parquet.](../outputs/figures/part1_storage_comparison.png)
-
----
 
 ## 3. Data Quality Audit and Point-in-Time Panel Construction
 
@@ -141,8 +135,6 @@ Every distinct bank in the 42-year panel (24,064 CERTs) is assigned a terminal e
 
 Two additional point-in-time safeguards eliminate subtle survival and timing leakage. First, across the 4,117 raw resolution records (3,524 formal failures and 593 assistance transactions), 44 CERTs appear multiple times (37 assistance-then-failure, 4 repeated assistance, and 3 repeated failure). Retaining each bank's earliest resolution date and removing all filings with $\text{REPDTE} \ge \text{FAILDATE}$ drops 5,636 post-event rows (0.335% across 471 banks: 4,428 following assistance and 1,208 on or after formal closure), leaving 1,676,980 strictly pre-event Gold observations. Second, Call Reports become publicly available approximately 60 days after quarter-end ($\text{available\_date} = \text{REPDTE} + 60\text{ days}$). Among failed banks, 59.1% failed within 60 days of their last filed quarter (median gap of 49 days); those filings could not have informed an ex-ante supervisory decision and are marked non-scorable (`pit_scorable = False`), excluding them from both model fitting and performance evaluation.
 
----
-
 ## 4. Scalable Processing: Polars, Pandas, and PySpark
 
 ### 4.1 Query Optimization in Polars
@@ -174,8 +166,6 @@ Measuring across 1x–8x exposes the structural memory advantage of streaming co
 In `scripts/06_spark.py` (1.2 GB driver memory), PySpark Catalyst reproduces Polars outputs identically across all 43 annual partitions, achieving a 0.0 maximum absolute difference across 33,042 sampled rows and a $7.4 \times 10^{-15}$ maximum relative difference in yearly aggregate checksums (`outputs/tables/spark_polars_parity.json`). Inspecting the Catalyst physical plan (`outputs/tables/spark_execution_plan.txt`) reveals two full `Exchange` shuffle barriers—first partitioning by (CERT, YEAR) for YTD de-cumulation, then repartitioning by (CERT) for 4-quarter lags. Even on an equal 4-thread footing, PySpark `local[4]` incurs 4.065 s of JVM startup overhead and requires 15.182 s total (11.117 s compute, 1,807.8 MB Python+JVM tree RSS) at 6.73 million rows compared with 2.173 s in 4-thread Polars Streaming—7.0x slower end-to-end and 5.1x slower compute-only, while `local[2]` requires 16.163 s and 1,770.3 MB tree RSS. These measurements confirm that JVM initialization and shuffle barriers, rather than thread count, dominate local Spark latency. Consequently, a distributed Spark cluster is unwarranted for quarterly bank-level Call Reports below 30–50 million rows and becomes justified only when wide multi-schedule expansions or borrower-level credit registries overflow single-node RAM.
 <!-- SYNC:END:REPORT_PART3_SECTION -->
 
----
-
 ## 5. Leak-Free CAMELS Feature Engineering
 
 ### 5.1 Supervisory Feature Design
@@ -201,8 +191,6 @@ Guided by the U.S. Uniform Financial Institutions Rating System (CAMELS) and ban
 Every panel lag and financial ratio uses strictly historical rows at or before the reporting quarter, and all ex-post exit metadata (ACTIVE, CHANGEC1, FAILDATE, COST) are structurally excluded via an explicit forbidden-column list. Within each walk-forward training fold, the scikit-learn preprocessing chain—RobustWinsorizer (1st–99th percentiles), median SimpleImputer with missingness indicators, StandardScaler, and the Elkan (2001) PriorOddsCalibrator—is fitted exclusively on training rows.
 
 Fitting preprocessors naively across the combined development and test panel introduces severe secular look-ahead distortion (`outputs/tables/leak_parameter_shift.csv`), shifting 99th-percentile winsorization bounds by 20.95% for `brokered_dep_ratio`, 16.19% for `eq_asset_ratio`, and 16.00% for `loan_growth_4q`, while shifting imputation medians by 43.04% for `d4_texas_ratio` and 23.48% for `con_loan_share`. Automated pytest suites (`tests/test_pipeline.py`) verify causal truncation invariance, strict inter-fold purge gaps, and bit-exact preprocessor invariance even when held-out test features are artificially corrupted with values of $10^9$.
-
----
 
 ## 6. Modelling, Temporal Validation, and Cost-Sensitive Thresholding
 
@@ -330,8 +318,6 @@ As a purely diagnostic post-hoc inspection of frozen test-set scores (`outputs/t
 
 Every top-five GFC credit-insolvency failure is flagged 129 to 304 days before closure, alongside modern credit-erosion failures such as Doral Bank (333 d lead) and Republic Bank (301 d lead). In sharp contrast, as shown in Figure 6 (right), Silicon Valley Bank, Signature Bank, and First Republic Bank remained near $\hat{p} \approx 5 \times 10^{-5}$ prior to their rapid 2023 collapses because their distress stemmed from concentrated uninsured deposit runs (DEPUNINS) and unrealized held-to-maturity bond duration losses (SCHA and SCHF) rather than credit delinquency—exposing the exact boundary of credit-trained Call Report models.
 
----
-
 ## 7. Conclusions, Limitations, and Institutional Adaptation for Vietnam
 
 ### 7.1 Empirical Limitations
@@ -347,8 +333,6 @@ Second, regulatory accounting adjustments are essential under Vietnamese Account
 Third, because a cross-section of 35 banks is too small to sustain machine learning on quarterly balance sheets alone, an operational SBV EWS must fuse monthly regulatory filings with granular Credit Information Center (CIC) borrower-level credit registries (capturing cross-bank nonperforming-loan contagion and ecosystem or related-party concentration) and daily CITAD interbank payment and liquidity flows (detecting sudden retail deposit runs or interbank rate spikes in real time, as observed during the October 2022 SCB episode).
 
 Fourth, infrastructure sizing follows directly from the scaling boundary established in Section 4. Bank-level monthly panels for approximately 50 institutions require less than 50 MB and execute instantaneously in single-node Polars. Once the SBV integrates tens of millions of quarterly CIC borrower exposures alongside daily CITAD payment streams, however, the active dataset scales into hundreds of gigabytes—crossing the 30–50 million row threshold where the Bronze, Silver, and Gold Parquet lakehouse transitions from laptop Polars to an on-premise SBV Apache Spark cluster.
-
----
 
 ## Notes and Disclosures
 

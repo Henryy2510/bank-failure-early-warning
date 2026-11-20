@@ -232,7 +232,7 @@ def test_pdf_page_limit():
     import subprocess
     from src.bfews.utils import ROOT
 
-    pdf_path = ROOT / "report" / "BFT65B_Final_Report.pdf"
+    pdf_path = ROOT / "report" / "QuanHuuNhatMinh_11230998_Final_Report.pdf"
     assert pdf_path.exists(), "Run 08_build_notebooks_and_report.py first"
     out = subprocess.run(["pdfinfo", str(pdf_path)], check=True, capture_output=True, text=True).stdout
     m = re.search(r"Pages:\s+(\d+)", out)
