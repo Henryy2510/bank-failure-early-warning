@@ -330,15 +330,16 @@ def sync_benchmarks_into_docs() -> None:
         f"(1.68 million rows across 33 fields) are best stored as Hive-partitioned Apache Parquet (`YEAR=YYYY`) with Zstandard level-3 compression, "
         f"canonical Arrow typing (Int32 keys, Date32 dates, Float64 measures), and sorted (REPDTE, CERT) row groups, compressing raw CSV storage by "
         f"{hive_r['compression_vs_csv']:.2f}x ({csv_r['size_mb']:.1f} MB to {hive_r['size_mb']:.1f} MB; write time {hive_r['write_s']:.3f} s). "
-        f"On a 1x–8x stress test up to 13.46 million rows ({env['cpu_logical']} logical CPUs, {env['ram_total_gb']:.2f} GB RAM, 4 Polars threads), "
+        f"On a 1x–8x stress test up to 13.46 million synthetically replicated rows ({env['cpu_logical']} logical CPUs, {env['ram_total_gb']:.2f} GB RAM, 4 Polars threads, median of 3 fresh `spawn` runs), "
         f"Polars Streaming finishes in {ps8['time_s']:.3f} s ({int(ps8['peak_rss_mb']):,} MB peak RSS; Polars Lazy: {pl8['time_s']:.3f} s / {int(pl8['peak_rss_mb']):,} MB), "
-        f"scaling at {ps_s['mb_per_million_rows']:.1f} MB per million rows (extrapolated {ps_s['rows_millions_until_16gb']:.1f}-million-row ceiling in 16 GB RAM) "
+        f"scaling at {ps_s['mb_per_million_rows']:.1f} MB per million rows (extrapolated {ps_s['rows_millions_until_16gb']:.1f}-million-row ceiling on the 8-column core workload in 16 GB RAM) "
         f"versus {pd_s['mb_per_million_rows']:.1f} MB per million rows for Pandas with pushdown ({pd_s['rows_millions_until_16gb']:.1f}-million-row ceiling; "
-        f"{int(pn1['peak_rss_mb']):,} MB at 1x for naive Pandas). At equal 4-thread concurrency, PySpark 4.3 (`local[4]`) reproduces identical numeric outputs "
+        f"{int(pn1['peak_rss_mb']):,} MB at 1x for naive Pandas). Applying a 3x–5x safety factor for the full 34-column schema, OS overhead, and modeling buffers yields a practical 30–50 million full-schema row laptop limit. "
+        f"At equal 4-thread concurrency, PySpark 4.3 (`local[4]`) reproduces identical numeric outputs "
         f"(${parity_sum_sci}$ yearly-sum parity, $0.000$ sample max diff) in {sp1_4['total_s']:.3f} s at 1x ({sp1_4['peak_rss_tree_mb']:,.1f} MB tree RSS) and "
         f"{sp4_4['total_s']:.3f} s at 4x (6.73 million rows, {sp4_4['peak_rss_tree_mb']:,.1f} MB tree RSS; `local[2]`: {sp4_2['total_s']:.3f} s). "
         f"A distributed Spark cluster is therefore unnecessary for bank-level Call Reports below 30–50 million rows and becomes justified only when expanding to "
-        f"thousands of regulatory schedules, borrower-level credit registries exceeding $10^8$ rows, or high-frequency interbank payment streams surpassing 32–64 GB single-node memory."
+        f"wide multi-schedule regulatory panels, borrower-level credit registries exceeding $10^8$ rows, or high-frequency interbank payment streams spanning tens to hundreds of gigabytes."
     )
 
     p1_table = "\n".join([
@@ -361,10 +362,11 @@ def sync_benchmarks_into_docs() -> None:
     spark_compute_slowdown_4t = sp4_4["compute_s"] / ps4["time_s"]
     p3_section = (
         f"### 4.2 Multi-Scale Benchmark (1x–8x, Up to 13.46 Million Rows)\n\n"
-        f"To avoid unreliable linear extrapolation from sub-1.7-million-row slices, we benchmark Polars, Pandas, and PySpark on disjoint replicated panels scaled from "
-        f"1x (1.68 million rows) up to 8x (13,460,928 rows) inside isolated `spawn` subprocesses on a Linux workstation equipped with {env['cpu_physical']} physical ({env['cpu_logical']} logical) CPUs "
+        f"To avoid unreliable linear extrapolation from sub-1.7-million-row slices, we benchmark Polars, Pandas, and PySpark on disjoint synthetically replicated panels scaled from "
+        f"1x (1.68 million rows) up to 8x (13,460,928 rows) by shifting bank identifiers ($\\text{{CERT}} + r \\times 10^6$) across copies, isolating row-volume and shuffle scaling while preserving per-bank panel structure. "
+        f"Each benchmark cell reports the median of 3 independent fresh `spawn` subprocess runs under warm OS page cache on a Linux workstation equipped with {env['cpu_physical']} physical ({env['cpu_logical']} logical) CPUs "
         f"and {env['ram_total_gb']:.2f} GB RAM (Polars {env['polars']} capped at 4 threads; pandas {env['pandas']}). "
-        f"For an equal-core comparison against 4-thread Polars, PySpark is benchmarked at `local[4]` alongside the 2-thread `local[2]` laptop-memory baseline.\n\n"
+        f"For an equal-core comparison against 4-thread Polars, PySpark is benchmarked at `local[4]` alongside `local[2]` through 4x (6.73 million rows) to stay within local JVM memory and runtime budgets, whereas Polars Streaming and Lazy extend to 8x.\n\n"
         f"**Table 5.** Multi-scale processing runtime and peak memory benchmark across Polars, Pandas, and PySpark (1x–8x).\n\n"
         f"| Scale (Rows) | Polars Streaming (4t) | Polars Lazy (4t) | Polars Eager (4t) | Pandas + Pushdown | PySpark `local[4]` (4t) *(vs. `local[2]`)* |\n"
         f"| :--- | :---: | :---: | :---: | :---: | :---: |\n"
@@ -372,7 +374,7 @@ def sync_benchmarks_into_docs() -> None:
         f"| 2x (3.37M) | {ps2['time_s']:.3f} s / {int(ps2['peak_rss_mb']):,} MB | {pl2['time_s']:.3f} s / {int(pl2['peak_rss_mb']):,} MB | {pe2['time_s']:.3f} s / {int(pe2['peak_rss_mb']):,} MB | {pd2['time_s']:.3f} s / {int(pd2['peak_rss_mb']):,} MB | — |\n"
         f"| 4x (6.73M) | **{ps4['time_s']:.3f} s / {int(ps4['peak_rss_mb']):,} MB** | {pl4['time_s']:.3f} s / {int(pl4['peak_rss_mb']):,} MB | {pe4['time_s']:.3f} s / {int(pe4['peak_rss_mb']):,} MB | {pd4['time_s']:.3f} s / {int(pd4['peak_rss_mb']):,} MB | {sp4_4['total_s']:.3f} s ({sp4_4['compute_s']:.3f} s compute) / {sp4_4['peak_rss_tree_mb']:,.1f} MB *(`local[2]`: {sp4_2['total_s']:.3f} s / {sp4_2['peak_rss_tree_mb']:,.1f} MB)* |\n"
         f"| 8x (13.46M) | **{ps8['time_s']:.3f} s / {int(ps8['peak_rss_mb']):,} MB** | {pl8['time_s']:.3f} s / {int(pl8['peak_rss_mb']):,} MB | *(skipped OOM risk)* | *(skipped eager overhead)* | — |\n\n"
-        f"*Note(s):* Cells report wall-clock runtime / peak RSS (Python+JVM process-tree RSS for PySpark). Maximum relative checksum difference across all Polars, Pandas, and PySpark runs is $\\le {_format_latex_sci(max_diff)}$. "
+        f"*Note(s):* Cells report median wall-clock runtime / peak RSS across 3 fresh `spawn` subprocesses (Python+JVM process-tree RSS for PySpark). Maximum relative checksum difference across all Polars, Pandas, and PySpark runs is $\\le {_format_latex_sci(max_diff)}$. "
         f"Sources: `outputs/tables/part3_benchmark_results.csv`, `spark_scaling_results.csv`, and `benchmark_environment.json`.\n\n"
         f"A notable crossover appears in Table 5 and Figure 3: at 1x–4x on pre-sorted 8-column slices, Pandas with manual column pushdown edges Polars Streaming on raw wall time "
         f"({pd1['time_s']:.3f} s vs. {ps1['time_s']:.3f} s at 1x; {pd4['time_s']:.3f} s vs. {ps4['time_s']:.3f} s at 4x) because PyArrow loads compact pre-sorted slices directly into contiguous NumPy arrays "
@@ -380,17 +382,26 @@ def sync_benchmarks_into_docs() -> None:
         f"Because Pandas materializes full $O(N)$ intermediate column copies during `groupby` and `shift` transformations, its peak RSS grows at {pd_s['mb_per_million_rows']:.1f} MB per million rows—"
         f"already consuming {ram_pct_more}% more memory than Polars Streaming at 4x ({int(pd4['peak_rss_mb']):,} MB vs. {int(ps4['peak_rss_mb']):,} MB) and exhausting 16 GB RAM by roughly {pd_s['rows_millions_until_16gb']:.1f} million rows. "
         f"By contrast, Polars Streaming executes pipelined Rust operators over bounded morsels, flattening peak-memory growth to {ps_s['mb_per_million_rows']:.1f} MB per million rows "
-        f"(a {slope_ratio:.2f}x shallower slope; {ps_s['seconds_per_million_rows']:.3f} s per million rows), raising the extrapolated single-laptop ceiling to {ps_s['rows_millions_until_16gb']:.1f} million rows inside 16 GB RAM.\n\n"
+        f"(a {slope_ratio:.2f}x shallower slope; {ps_s['seconds_per_million_rows']:.3f} s per million rows), yielding an upper-bound ceiling of {ps_s['rows_millions_until_16gb']:.1f} million rows for the 8-column core benchmark inside 16 GB RAM. "
+        f"Translating this 8-column theoretical ceiling into an operational cluster boundary requires a 3x–5x safety factor: reserving 3–4 GB for the OS and Python runtime, expanding from 8 benchmark columns to the full 34-column regulatory schema plus 26 engineered features (~3–4x wider in-memory footprint), and retaining headroom for tree-ensemble training buffers narrows single-laptop capacity to roughly 30–50 million full-schema rows.\n\n"
         f"![Multi-scale execution time and peak RSS memory scaling across Polars, Pandas, and PySpark (1x–8x).](../outputs/figures/part3_scaling_benchmark.png)\n\n"
         f"### 4.3 PySpark Reproduction, Parity Verification, and Cluster Justification\n\n"
         f"In `scripts/06_spark.py` (1.2 GB driver memory), PySpark Catalyst reproduces Polars outputs identically across all 43 annual partitions, achieving a 0.0 maximum absolute difference across 33,042 sampled rows "
         f"and a ${parity_sum_sci}$ maximum relative difference in yearly aggregate checksums (`outputs/tables/spark_polars_parity.json`). Inspecting the Catalyst physical plan (`outputs/tables/spark_execution_plan.txt`) explains why Spark lags on single-node workloads: "
-        f"Catalyst inserts two full `Exchange` shuffle barriers—first hash-partitioning by (CERT, YEAR) for YTD de-cumulation, then repartitioning by (CERT) for 4-quarter lags—serializing intermediate state across JVM boundaries. "
+        f"Catalyst inserts two full `Exchange` shuffle barriers—first hash-partitioning by (CERT, YEAR) for YTD de-cumulation, then repartitioning by (CERT) for 4-quarter lags—serializing intermediate state across JVM boundaries:\n\n"
+        f"```text\n"
+        f"# PySpark Catalyst Physical Plan (excerpt, outputs/tables/spark_execution_plan.txt)\n"
+        f"AdaptiveSparkPlan(12) -> Project(11) -> Window(10, lag 4Q over CERT) -> Sort(9, CERT, REPDTE)\n"
+        f"  -> Exchange(8): hashpartitioning(CERT#0, 8), ENSURE_REQUIREMENTS\n"
+        f"    -> Project(7) -> Window(6, lag 1Q over CERT, YEAR) -> Sort(5, CERT, YEAR, REPDTE)\n"
+        f"      -> Exchange(4): hashpartitioning(CERT#0, YEAR#33, 8), ENSURE_REQUIREMENTS\n"
+        f"        -> Scan parquet(1) [Batched: true, ReadSchema: 8 core cols + Hive YEAR]\n"
+        f"```\n\n"
         f"Even on an equal 4-thread footing, PySpark `local[4]` incurs {sp4_4['spark_startup_s']:.3f} s of JVM startup overhead "
         f"and requires {sp4_4['total_s']:.3f} s total ({sp4_4['compute_s']:.3f} s compute, {sp4_4['peak_rss_tree_mb']:,.1f} MB Python+JVM tree RSS) at 6.73 million rows compared with {ps4['time_s']:.3f} s in 4-thread Polars Streaming—"
         f"{spark_slowdown_4t:.1f}x slower end-to-end and {spark_compute_slowdown_4t:.1f}x slower compute-only, while `local[2]` requires {sp4_2['total_s']:.3f} s and {sp4_2['peak_rss_tree_mb']:,.1f} MB tree RSS. "
         f"Doubling Spark's local thread count trims total latency by only {(1.0 - sp4_4['total_s'] / sp4_2['total_s']) * 100.0:.1f}%, confirming that JVM startup and shuffle barriers rather than core count dominate local latency. "
-        f"Consequently, a distributed Spark cluster is unwarranted for quarterly bank-level Call Reports below 30–50 million rows and becomes justified only when wide multi-schedule expansions or borrower-level credit registries exceed single-node memory or require fault-tolerant disk-spilling execution."
+        f"Consequently, a distributed Spark cluster is unwarranted for quarterly bank-level Call Reports below our derived 30–50 million full-schema row threshold and becomes justified only when wide multi-schedule expansions, borrower-level credit registries (>100 million rows), or daily payment streams span tens to hundreds of gigabytes beyond single-node RAM."
     )
 
     md_path = ROOT / "report" / "report.md"
@@ -447,6 +458,23 @@ end
 function Code(el)
   if FORMAT:match "latex" then
     return pandoc.RawInline("latex", "{\\normalfont\\ttfamily " .. latex_escape_code(el.text) .. "}")
+  end
+end
+
+function CodeBlock(el)
+  if FORMAT:match "latex" then
+    local lines = {}
+    for line in (el.text .. "\n"):gmatch("(.-)\n") do
+      local escaped = line:gsub("\\", "\\textbackslash{}")
+      escaped = escaped:gsub("([%%$&#{}])", "\\%1")
+      escaped = escaped:gsub("%^", "\\textasciicircum{}")
+      escaped = escaped:gsub("~", "\\textasciitilde{}")
+      escaped = escaped:gsub("_", "\\_")
+      escaped = escaped:gsub(" ", "\\ ")
+      table.insert(lines, escaped)
+    end
+    local body = table.concat(lines, "\\\\\n")
+    return pandoc.RawBlock("latex", "\\begin{codebox}\\noindent\\scriptsize\\ttfamily\\linespread{1.0}\\selectfont\n" .. body .. "\n\\end{codebox}")
   end
 end
 
@@ -683,6 +711,23 @@ _XELATEX_PREAMBLE = r"""
   skipabove=2pt,
   skipbelow=3pt
 ]{abstractbox}
+\newmdenv[
+  backgroundcolor=abstractbg,
+  linecolor=journalblue,
+  linewidth=1.2pt,
+  topline=false,
+  rightline=false,
+  bottomline=false,
+  nobreak=true,
+  leftmargin=0pt,
+  rightmargin=0pt,
+  innerleftmargin=6pt,
+  innerrightmargin=5pt,
+  innertopmargin=4pt,
+  innerbottommargin=4pt,
+  skipabove=4pt,
+  skipbelow=4pt
+]{codebox}
 \usepackage{float}
 \floatplacement{figure}{htbp}
 \renewcommand{\topfraction}{0.90}
@@ -934,6 +979,21 @@ def _style_docx_report(docx_path: Path) -> None:
             p.paragraph_format.space_after = Pt(6)
             for run in p.runs:
                 run.font.size = Pt(10)
+            after_heading = True
+        elif sname == "Source Code":
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            p.paragraph_format.first_line_indent = Inches(0)
+            p.paragraph_format.left_indent = Inches(0.12)
+            p.paragraph_format.right_indent = Inches(0.12)
+            p.paragraph_format.line_spacing = 1.05
+            p.paragraph_format.space_before = Pt(1)
+            p.paragraph_format.space_after = Pt(1)
+            _shade_paragraph(p, "F3F5F8")
+            for run in p.runs:
+                run.font.name = "Courier New"
+                _set_xml_font(run._r.get_or_add_rPr(), "Courier New")
+                run.font.size = Pt(8.5)
+                run.font.bold = False
             after_heading = True
         elif sname not in ("Source Code",):
             p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY

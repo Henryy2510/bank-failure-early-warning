@@ -79,6 +79,12 @@ def main() -> None:
         f"${cfp_stab['cfp_hi_kusd']:.1f}\\text{{k}}",
         "88.56%",
         "5,636",
+        "1984 (4 qtrs)",
+        "2,320",
+        "3,241",
+        "3,192",
+        "Table A2.",
+        "2007-12-31",
     ]
 
     for row in cv_df.iter_rows(named=True):
@@ -146,7 +152,7 @@ def main() -> None:
     if missing_readme:
         raise AssertionError(f"Missing expected tokens in README.md: {missing_readme}")
 
-    # 3. Verify compiled PDF exists and stays within the 20-page limit
+    # 3. Verify compiled PDF exists and complies with rubric page limits (<= 20 main body + <= 10 appendix)
     pdf_path = ROOT / "report" / "QuanHuuNhatMinh_11230998_Final_Report.pdf"
     if not pdf_path.exists():
         raise AssertionError(f"Missing compiled PDF: {pdf_path}")
@@ -155,9 +161,15 @@ def main() -> None:
     if not m:
         raise AssertionError("Could not parse page count from pdfinfo output")
     pages = int(m.group(1))
-    if pages > 20:
-        raise AssertionError(f"Compiled PDF exceeds 20-page limit: {pages} pages")
     pdf_txt = subprocess.run(["pdftotext", str(pdf_path), "-"], check=True, capture_output=True, text=True).stdout
+    pdf_pages = [p for p in pdf_txt.split("\f") if p.strip()]
+    app_page = next((idx + 1 for idx, ptxt in enumerate(pdf_pages) if "Appendix:" in ptxt), None)
+    main_pages = (app_page - 1) if app_page is not None else pages
+    appendix_pages = pages - main_pages
+    if main_pages > 20:
+        raise AssertionError(f"Compiled PDF main body exceeds 20-page limit: {main_pages} main pages (total {pages})")
+    if appendix_pages > 10 or pages > 30:
+        raise AssertionError(f"Compiled PDF appendix exceeds 10-page limit: {appendix_pages} appendix pages (total {pages})")
     raw_latex_leaks = [tok for tok in ("\\theta", "\\rightarrow", "\\mathcal{", "$y_{") if tok in pdf_txt]
     if raw_latex_leaks:
         raise AssertionError(f"Found unrendered LaTeX markup in compiled PDF: {raw_latex_leaks}")
@@ -233,7 +245,7 @@ def main() -> None:
 
     log.info(
         f"All report.md and README.md numbers verified against JSON/CSV outputs "
-        f"(PDF = {pages} pages <= 20) with zero stale tokens!"
+        f"(PDF = {main_pages} main <= 20 + {appendix_pages} appendix <= 10; total {pages} pages) with zero stale tokens!"
     )
 
 

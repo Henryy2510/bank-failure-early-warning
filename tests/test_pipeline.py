@@ -227,7 +227,7 @@ def test_feature_importance_and_canary_outputs():
 
 
 def test_pdf_page_limit():
-    """Verify compiled PDF report exists and complies with the strict 20-page ceiling."""
+    """Verify compiled PDF report exists and complies with the rubric ceiling (<= 20 main + <= 10 appendix)."""
     import re
     import subprocess
     from src.bfews.utils import ROOT
@@ -238,7 +238,13 @@ def test_pdf_page_limit():
     m = re.search(r"Pages:\s+(\d+)", out)
     assert m is not None
     pages = int(m.group(1))
-    assert 15 <= pages <= 20, f"Expected 15-20 pages, got {pages}"
+    pdf_txt = subprocess.run(["pdftotext", str(pdf_path), "-"], check=True, capture_output=True, text=True).stdout
+    pdf_pages = [p for p in pdf_txt.split("\f") if p.strip()]
+    app_page = next((idx + 1 for idx, ptxt in enumerate(pdf_pages) if "Appendix:" in ptxt), None)
+    main_pages = (app_page - 1) if app_page is not None else pages
+    appendix_pages = pages - main_pages
+    assert 15 <= main_pages <= 20, f"Expected 15-20 main body pages, got {main_pages}"
+    assert appendix_pages <= 10 and pages <= 30, f"Expected <= 10 appendix pages (total <= 30), got {appendix_pages} (total {pages})"
 
 
 def test_cblr_rbcrwaj_zero_and_negative_stock_sanitized():
