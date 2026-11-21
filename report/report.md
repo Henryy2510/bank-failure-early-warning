@@ -260,7 +260,7 @@ Evaluating the frozen DEV-trained HistGradientBoosting champion once on the 400,
 
 Table 10 and Figure 6 (left) highlight an important macroprudential contrast between fixed-budget and calibrated-threshold triage. Although $\theta^* = 0.0039$ flags a larger pooled share of rows over the 16-year test horizon (2.894% vs. 1.000%), its *median* quarterly workload is actually lower than the Top-1% rule (43.0 vs. 58.5 alerts per quarter) while lifting bank recall from 82.27% to 96.70% and median warning lead time from 210.0 to 297.0 days. Fixed percentage quotas force supervisors to inspect a constant fraction of the industry even during benign expansions (2015–2022), dissipating examination capacity on low-risk banks while capping coverage during systemic waves. Because our probabilities are calibrated to historical prior odds (Elkan, 2001), $\theta^*$ adapts countercyclically—surging above 400 alerts per quarter during the 2009–2011 GFC peak and contracting sharply during calm periods.
 
-![Held-out test operating points across capacity budgets and crisis regime subperiods.](../outputs/figures/operating_points.png)
+![Held-out test operating points: recall and precision (left) and supervisory inspection burden (right).](../outputs/figures/operating_points.png)
 
 ![Quarterly supervisory alerts over time (left) and risk trajectories for major historical failure cases (right).](../outputs/figures/alarms_and_canary_trajectories.png)
 

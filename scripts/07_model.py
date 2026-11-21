@@ -124,11 +124,11 @@ def plot_operating_points(results: dict):
     ax1.bar([i + width for i in x], prec, width, label="Row Precision", color="#f0ad4e")
     ax1.set_xticks(list(x))
     ax1.set_xticklabels(labels, rotation=15, ha="right")
-    ax1.set_ylim(0, 1.08)
+    ax1.set_ylim(0, 1.22)
     ax1.set_ylabel("Rate")
     ax1.set_title("Held-Out Test Operating Points: Recall & Precision")
     ax1.grid(True, alpha=0.3)
-    ax1.legend(loc="lower right")
+    ax1.legend(loc="upper center", ncol=3, fontsize=8.2, frameon=True)
 
     bars = ax2.bar(list(x), flagged_pct, width=0.45, color="#d9534f")
     for b, p in zip(bars, pts):

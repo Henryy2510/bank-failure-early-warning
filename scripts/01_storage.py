@@ -124,10 +124,12 @@ def plot_storage(res: pl.DataFrame) -> None:
     d = res.filter(pl.col("format").str.starts_with("pandas").not_()).to_pandas()
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(12, 4.2))
     a1.barh(d["format"], d["size_mb"], color=["#d9534f", "#f0ad4e", "#5bc0de", "#5cb85c"])
+    a1.set_xlim(0, float(d["size_mb"].max()) * 1.22)
     a1.set_xlabel("size on disk (MB)")
     a1.set_title("Storage footprint (1.68M rows)")
+    a1.grid(True, axis="x", alpha=0.3)
     for i, v in enumerate(d["size_mb"]):
-        a1.text(v, i, f" {v:.0f}", va="center")
+        a1.text(v + 6, i, f"{v:.1f} MB", va="center", fontsize=9)
     w = 0.27
     x = range(len(d))
     a2.bar([i - w for i in x], d["full_read_s"], w, label="read all columns")
@@ -135,9 +137,11 @@ def plot_storage(res: pl.DataFrame) -> None:
     a2.bar([i + w for i in x], d["filter_2023_s"], w, label="filter year 2023")
     a2.set_xticks(list(x))
     a2.set_xticklabels(["CSV", "Parquet\nSnappy", "Parquet\nZstd", "Hive\nZstd"])
+    a2.set_ylim(0, float(d[["full_read_s", "read_3_cols_s", "filter_2023_s"]].max().max()) * 1.15)
     a2.set_ylabel("seconds (median of 3)")
     a2.set_title("Read time")
-    a2.legend()
+    a2.grid(True, axis="y", alpha=0.3)
+    a2.legend(loc="upper right", fontsize=8.5)
     plt.tight_layout()
     p = out_dir("figures") / "part1_storage_comparison.png"
     plt.savefig(p, dpi=200)
