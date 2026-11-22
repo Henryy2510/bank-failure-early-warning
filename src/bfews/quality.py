@@ -42,10 +42,17 @@ def audit_schema_drift() -> pl.DataFrame:
 
 def audit_missingness_by_era(df: pl.DataFrame) -> pl.DataFrame:
     cols = ["P3ASSET", "P9ASSET", "NAASSET", "ELNATR", "NTLNLS", "RBC1AAJ", "EQ"]
-    return (df.with_columns((pl.col("REPDTE").dt.year() // 5 * 5).alias("era"))
-            .group_by("era")
+    era_num = pl.col("REPDTE").dt.year() // 5 * 5
+    era_label = (
+        pl.when(era_num == 1980).then(pl.lit("1984 (4 qtrs)"))
+        .when(era_num == 2025).then(pl.lit("2025-2026"))
+        .otherwise(era_num.cast(pl.String) + pl.lit("-") + (era_num + 4).cast(pl.String))
+    )
+    return (df.with_columns(era_num.alias("_era_sort"), era_label.alias("era"))
+            .group_by(["_era_sort", "era"])
             .agg(pl.len().alias("rows"), *[(pl.col(c).is_null().mean() * 100).round(1).alias(f"{c} null %") for c in cols])
-            .sort("era"))
+            .sort("_era_sort")
+            .drop("_era_sort"))
 
 
 def audit_domain_validity(df: pl.DataFrame) -> dict[str, Any]:
@@ -73,6 +80,7 @@ def audit_domain_validity(df: pl.DataFrame) -> dict[str, Any]:
         "chbal_negative": cnt(pl.col("CHBAL") < 0),
         "nclnls_negative": cnt(pl.col("NCLNLS") < 0),
         "lnatres_negative": cnt(pl.col("LNATRES") < 0),
+        "naasset_negative": cnt(pl.col("NAASSET") < 0),
         "extreme_roa": cnt(pl.col("ROA").abs() > 50),
         "extreme_roe": cnt(pl.col("ROE").abs() > 200),
         "pre1990_rows": pre90.height,
@@ -147,7 +155,11 @@ def audit_failures_and_exits(df: pl.DataFrame) -> dict[str, Any]:
         "events_matched_to_panel": matched.height,
         "events_not_in_panel": with_cert.height - matched.height,
         "restype_since_1984": {r["RESTYPE"]: r["len"] for r in since.group_by("RESTYPE").len().to_dicts()},
-        "certs_with_multiple_events": int(raw.filter(pl.col("CERT").is_not_null())["CERT"].is_duplicated().sum()),
+        "certs_with_multiple_events": int(
+            raw.filter(pl.col("CERT").is_not_null())
+            .group_by("CERT").len().filter(pl.col("len") > 1).height
+        ),
+        "rows_from_multiple_event_certs": int(raw.filter(pl.col("CERT").is_not_null())["CERT"].is_duplicated().sum()),
         "failed_banks_in_panel": j.height,
         "gap_median_days": float(j["gap"].median()),
         "gap_p95_days": float(j["gap"].quantile(0.95)),
@@ -201,7 +213,7 @@ def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
         f"- Negative equity: **{v['negative_equity']:,}** rows ({v['negative_equity_pct']}%)",
         f"- `DEP > ASSET`: **{v['deposits_exceed_assets']:,}** rows, of which **{v['deposits_exceed_assets_with_negative_equity']:,}** have negative equity",
         f"- `DEPDOM > DEP`: **{v['domestic_exceeds_total_deposits']}**; `LNLSNET > LNLSGR`: **{v['net_loans_exceed_gross_loans']}**; `LNLSGR > ASSET`: **{v['gross_loans_exceed_assets']:,}**",
-        f"- Non-negative stock anomalies: `ORE < 0` (**{v['ore_negative']:,}**), `SC < 0` (**{v['sc_negative']:,}**), `CHBAL < 0` (**{v['chbal_negative']:,}**), `NCLNLS < 0` (**{v['nclnls_negative']:,}**), `LNATRES < 0` (**{v['lnatres_negative']:,}**)",
+        f"- Non-negative stock anomalies: `ORE < 0` (**{v['ore_negative']:,}**), `SC < 0` (**{v['sc_negative']:,}**), `CHBAL < 0` (**{v['chbal_negative']:,}**), `NCLNLS < 0` (**{v['nclnls_negative']:,}**), `LNATRES < 0` (**{v['lnatres_negative']:,}**), `NAASSET < 0` (**{v['naasset_negative']:,}**)",
         f"- `NAASSET > NCLNLS + ORE`: **{v['nonaccrual_exceeds_noncurrent_plus_ore']:,}** rows (structural schedule reporting differences)",
         f"- |ROA| > 50%: **{v['extreme_roa']:,}** rows; |ROE| > 200%: **{v['extreme_roe']:,}** rows",
         "",
@@ -213,7 +225,7 @@ def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
         f"**{f['events_since_1984']:,}** since 1984 (by type: {f['restype_since_1984']})",
         f"- Events since 1984 with a CERT: **{f['events_since_1984_with_cert']:,}**; matched to the panel: **{f['events_matched_to_panel']:,}**; "
         f"not in panel: **{f['events_not_in_panel']}**",
-        f"- CERTs that appear more than once in the table: **{f['certs_with_multiple_events']}** (earliest event is used)",
+        f"- Unique CERTs that appear more than once in the table: **{f['certs_with_multiple_events']}** ({f['rows_from_multiple_event_certs']} total rows; earliest event is used)",
         rf"- Last Call Report $\rightarrow$ failure date: median **{f['gap_median_days']:.0f}** days, 95th percentile **{f['gap_p95_days']:.0f}** days",
         f"- **{f['share_last_report_not_scorable']}%** of failed banks fail within {f['publication_lag_days']} days of their last "
         "quarter-end, i.e. before that report could have been read: those rows are flagged `pit_scorable = False`",

@@ -1026,7 +1026,7 @@ def cfp_stability_interval(results: dict[str, Any] | None = None) -> dict[str, A
             "source": "FDIC 2024 Annual Report & Proposed 2025 Operating Budget (fdic.gov)",
             "rms_2024_ongoing_budget_musd": 703.0,
             "rms_2024_safety_soundness_exams": 1200,
-            "gross_budget_per_ss_exam_kusd": 585.9,
+            "gross_budget_per_ss_exam_kusd": 585.8,
             "note": "Upper bound because RMS budget also covers specialty exams (IT/Trust/BSA) and off-site monitoring; targeted off-cycle exams naturally sit in $250k-$500k.",
         },
     }

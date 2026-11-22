@@ -109,7 +109,7 @@ def parse_failures() -> pl.DataFrame:
 
 
 def failures_by_cert() -> pl.DataFrame:
-    """One row per CERT: its EARLIEST failure/assistance event (88 CERTs appear more than once in the raw table).
+    """One row per CERT: its EARLIEST failure/assistance event (44 unique CERTs / 88 rows appear more than once).
 
     RESTYPE is kept: FDIC lists both closures (FAILURE) and open-bank assistance (ASSISTANCE) in this table; the
     course defines the label from this table, so both count as failure events (counts are reported by type).

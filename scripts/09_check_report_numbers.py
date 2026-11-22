@@ -95,6 +95,12 @@ def main() -> None:
         f"{fs_col_e['rows_millions_in_12gb_usable']:.1f} million",
         "16.1%",
         "CERT 33802",
+        "$585.8k",
+        "spark_mllib_results.json",
+        "VND 350 million",
+        "05/2026/TT-NHNN",
+        "31/2024/TT-NHNN",
+        "14/2025/TT-NHNN",
     ]
 
     for row in cv_df.iter_rows(named=True):
@@ -265,6 +271,11 @@ def main() -> None:
         "30-50 million",
         "capped below 1.4 GB",
         "capped below `1.4 GB`",
+        "3,721",
+        "3721",
+        "$585.9k",
+        "VND 125 million",
+        "88 CERTs",
     ]
     stale_found = [
         tok for tok in stale_tokens if (tok in report_txt or tok in readme_txt)

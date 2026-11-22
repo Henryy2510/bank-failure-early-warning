@@ -21,6 +21,7 @@
     "chbal_negative": 2,
     "nclnls_negative": 3,
     "lnatres_negative": 9,
+    "naasset_negative": 2,
     "extreme_roa": 1056,
     "extreme_roe": 4624,
     "pre1990_rows": 419414,
@@ -44,7 +45,8 @@
       "FAILURE": 2863,
       "ASSISTANCE": 412
     },
-    "certs_with_multiple_events": 88,
+    "certs_with_multiple_events": 44,
+    "rows_from_multiple_event_certs": 88,
     "failed_banks_in_panel": 3211,
     "gap_median_days": 49.0,
     "gap_p95_days": 111.0,
@@ -69,7 +71,7 @@
   ],
   "missingness_by_era": [
     {
-      "era": 1980,
+      "era": "1984 (4 qtrs)",
       "rows": 71760,
       "P3ASSET null %": 100.0,
       "P9ASSET null %": 19.2,
@@ -80,7 +82,7 @@
       "EQ null %": 0.2
     },
     {
-      "era": 1985,
+      "era": "1985-1989",
       "rows": 347654,
       "P3ASSET null %": 100.0,
       "P9ASSET null %": 18.4,
@@ -91,7 +93,7 @@
       "EQ null %": 0.2
     },
     {
-      "era": 1990,
+      "era": "1990-1994",
       "rows": 286105,
       "P3ASSET null %": 100.0,
       "P9ASSET null %": 0.0,
@@ -102,7 +104,7 @@
       "EQ null %": 0.3
     },
     {
-      "era": 1995,
+      "era": "1995-1999",
       "rows": 225775,
       "P3ASSET null %": 100.0,
       "P9ASSET null %": 0.0,
@@ -113,7 +115,7 @@
       "EQ null %": 0.3
     },
     {
-      "era": 2000,
+      "era": "2000-2004",
       "rows": 192271,
       "P3ASSET null %": 21.1,
       "P9ASSET null %": 0.0,
@@ -124,7 +126,7 @@
       "EQ null %": 0.2
     },
     {
-      "era": 2005,
+      "era": "2005-2009",
       "rows": 172995,
       "P3ASSET null %": 0.0,
       "P9ASSET null %": 0.0,
@@ -135,7 +137,7 @@
       "EQ null %": 0.2
     },
     {
-      "era": 2010,
+      "era": "2010-2014",
       "rows": 145726,
       "P3ASSET null %": 0.0,
       "P9ASSET null %": 0.0,
@@ -146,7 +148,7 @@
       "EQ null %": 0.2
     },
     {
-      "era": 2015,
+      "era": "2015-2019",
       "rows": 116869,
       "P3ASSET null %": 0.0,
       "P9ASSET null %": 0.0,
@@ -157,7 +159,7 @@
       "EQ null %": 0.3
     },
     {
-      "era": 2020,
+      "era": "2020-2024",
       "rows": 96902,
       "P3ASSET null %": 0.0,
       "P9ASSET null %": 0.0,
@@ -168,7 +170,7 @@
       "EQ null %": 0.4
     },
     {
-      "era": 2025,
+      "era": "2025-2026",
       "rows": 26559,
       "P3ASSET null %": 0.0,
       "P9ASSET null %": 0.0,
