@@ -121,7 +121,7 @@ def test_polars_spark_parity():
 
     parity_file = out_dir("tables") / "spark_polars_parity.json"
     assert parity_file.exists(), "Run 06_spark.py first"
-    data = json.loads(parity_file.read_text())
+    data = json.loads(parity_file.read_text(encoding="utf-8"))
     assert data["yearly_fingerprint"]["row_and_null_counts_identical"] is True
     assert data["yearly_fingerprint"]["max_relative_diff_of_sums"] < 1e-10
     assert data["row_level_sample"]["rows_only_in_one_engine"] == 0
@@ -135,7 +135,7 @@ def test_held_out_test_results():
 
     res_file = out_dir("tables") / "test_results.json"
     assert res_file.exists(), "Run 07_model.py first"
-    res = json.loads(res_file.read_text())
+    res = json.loads(res_file.read_text(encoding="utf-8"))
     test_eval = res["held_out_test_evaluation"]
     assert test_eval["failing_banks_total"] >= 50
     assert test_eval["roc_auc"] > 0.90
@@ -149,7 +149,7 @@ def test_threshold_not_degenerate():
 
     res_file = out_dir("tables") / "test_results.json"
     assert res_file.exists(), "Run 07_model.py first"
-    res = json.loads(res_file.read_text())
+    res = json.loads(res_file.read_text(encoding="utf-8"))
     cost_opt = res["cost_threshold_tuning"]
     assert not cost_opt["theta_at_grid_edge"], "Optimal theta hit the boundary of theta_grid!"
     test_at = res["held_out_test_evaluation"]["at_threshold"]
@@ -167,7 +167,7 @@ def test_capacity_points_present():
 
     res_file = out_dir("tables") / "test_results.json"
     assert res_file.exists(), "Run 07_model.py first"
-    res = json.loads(res_file.read_text())
+    res = json.loads(res_file.read_text(encoding="utf-8"))
     cap = {p["pct"]: p for p in res["held_out_test_evaluation"]["capacity_points"]}
     assert {1, 2, 5}.issubset(cap.keys())
     assert cap[1]["bank_recall"] > 0.70
@@ -221,7 +221,7 @@ def test_feature_importance_and_canary_outputs():
     assert caught.height >= 6
     assert (caught["lead_days_theta"] > 0).all()
 
-    res = json.loads((out_dir("tables") / "test_results.json").read_text())
+    res = json.loads((out_dir("tables") / "test_results.json").read_text(encoding="utf-8"))
     assert len(res["feature_importance_top10"]) == 10
     assert len(res["held_out_test_evaluation"]["canary_case_studies"]) == canary_df.height
 
@@ -229,11 +229,14 @@ def test_feature_importance_and_canary_outputs():
 def test_pdf_page_limit():
     """Verify compiled PDF report exists and complies with the rubric ceiling (<= 20 main + <= 10 appendix)."""
     import re
+    import shutil
     import subprocess
     from src.bfews.utils import ROOT
 
     pdf_path = ROOT / "report" / "QuanHuuNhatMinh_11230998_Final_Report.pdf"
-    assert pdf_path.exists(), "Run 08_build_notebooks_and_report.py first"
+    assert pdf_path.exists() and pdf_path.stat().st_size > 10_000, "Run 08_build_notebooks_and_report.py first"
+    if not (shutil.which("pdfinfo") and shutil.which("pdftotext")):
+        pytest.skip("poppler-utils (pdfinfo/pdftotext) not installed on PATH; PDF file presence verified")
     out = subprocess.run(["pdfinfo", str(pdf_path)], check=True, capture_output=True, text=True).stdout
     m = re.search(r"Pages:\s+(\d+)", out)
     assert m is not None
@@ -419,7 +422,7 @@ def test_readme_download_command_paths_exist():
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "data/fdic_download_starter.py" not in readme, "Stale broken path data/fdic_download_starter.py in README.md"
-    for rel in ("fdic_download_starter.py", "scripts/00_download.py", "run_all.sh", "requirements.txt", "config.yaml"):
+    for rel in ("fdic_download_starter.py", "scripts/00_download.py", "run_all.sh", "run_all.ps1", "requirements.txt", "config.yaml"):
         assert (ROOT / rel).exists(), f"Referenced file missing: {rel}"
 
 

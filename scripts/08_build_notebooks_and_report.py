@@ -1,15 +1,17 @@
 """Generate executed Jupyter notebooks and the complete English Report (Markdown + DOCX + LaTeX PDF)."""
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib"
+os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "matplotlib"))
 os.environ["POLARS_MAX_THREADS"] = "4"
 
 import subprocess
@@ -115,7 +117,7 @@ def build_notebooks():
             (
                 "code",
                 "from pathlib import Path\nimport polars as pl\n\n"
-                "dq_text = Path('../outputs/dq_report/data_quality_report.md').read_text()\n"
+                "dq_text = Path('../outputs/dq_report/data_quality_report.md').read_text(encoding='utf-8')\n"
                 "print(dq_text[:2500] + '\\n...[see outputs/dq_report/data_quality_report.md for full report]...')",
             ),
             (
@@ -148,25 +150,25 @@ def build_notebooks():
                 "code",
                 "from pathlib import Path\nimport polars as pl\n\n"
                 "print('=== Naive vs Optimized Polars Query Plan ===')\n"
-                "print(Path('../outputs/tables/polars_naive_vs_optimized_plan.txt').read_text())",
+                "print(Path('../outputs/tables/polars_naive_vs_optimized_plan.txt').read_text(encoding='utf-8'))",
             ),
             (
                 "code",
                 "bench = pl.read_csv('../outputs/tables/part3_benchmark_results.csv')\n"
                 "print('=== Part 3 Multi-Scale (1x-8x) Benchmark ===')\nprint(bench)\n"
                 "print('\\n=== Full 34-Col Bronze -> 67-Col Gold Benchmark (collect vs sink_parquet) ===')\n"
-                "print(Path('../outputs/tables/part3_full_schema_benchmark.json').read_text())\n"
+                "print(Path('../outputs/tables/part3_full_schema_benchmark.json').read_text(encoding='utf-8'))\n"
                 "print('\\n=== PySpark Multi-Scale (1x & 4x) Python+JVM RSS ===')\n"
                 "print(pl.read_csv('../outputs/tables/spark_scaling_results.csv'))",
             ),
             (
                 "code",
                 "import json\n"
-                "parity = json.loads(Path('../outputs/tables/spark_polars_parity.json').read_text())\n"
+                "parity = json.loads(Path('../outputs/tables/spark_polars_parity.json').read_text(encoding='utf-8'))\n"
                 "print('=== PySpark vs Polars Parity Check ===')\n"
                 "print(json.dumps(parity, indent=2))\n"
                 "print('\\n=== PySpark Catalyst Execution Plan (Excerpt) ===')\n"
-                "print(Path('../outputs/tables/spark_execution_plan.txt').read_text()[:1500])",
+                "print(Path('../outputs/tables/spark_execution_plan.txt').read_text(encoding='utf-8')[:1500])",
             ),
         ],
         nb_dir / "03_scalable_processing_polars_spark.ipynb",
@@ -234,7 +236,7 @@ def build_notebooks():
             ),
             (
                 "code",
-                "res = json.loads(Path('../outputs/tables/test_results.json').read_text())\n"
+                "res = json.loads(Path('../outputs/tables/test_results.json').read_text(encoding='utf-8'))\n"
                 "cost_cfg = res['cost_threshold_tuning']\n"
                 "t_eval = res['held_out_test_evaluation']\n"
                 "print('=== DEV Cost-Optimal Threshold & Failing Bank Counts ===')\n"
@@ -435,7 +437,7 @@ def sync_benchmarks_into_docs() -> None:
         "| :--- | :--- |",
         f"| **Part 1: Storage** | Hive-partitioned Parquet (`YEAR`, Zstd L3, write **{hive_r['write_s']:.3f} s**) reduces footprint from **{csv_r['size_mb']:.1f} MB** (CSV) to **{hive_r['size_mb']:.1f} MB** (**{hive_r['compression_vs_csv']:.2f}x compression**); `YEAR=2023` filter executes in **{hive_r['filter_2023_s']:.3f} s**. Quantifies `{f32['ASSET']['rows_exceeding_float32_exact_int_limit']:,}` `ASSET` rows exceeding Float32 exact-int limit (up to **$128k** quantization error), justifying `Float64`. |",
         f"| **Part 2: Quality & Panel** | Resolves {len(dq['schema_drift_columns'])}-column schema drift, `P3ASSET` structural missingness, pre-1990 Basel zeroes (`{dq['validity']['pre1990_rbc1_zero_pct']}%`), **post-2020 CBLR `RBCRWAJ==0` (`{dq['validity']['era2020_rbcrwa_zero_pct']}%`, `{dq['validity']['era2020_rbcrwa_zero']:,}/{dq['validity']['era2020_rows']:,}` rows)**, negative stock anomalies (`ORE<0` `{dq['validity']['ore_negative']}`, `SC<0` `{dq['validity']['sc_negative']}`), YTD `Q1` → `Q4` flow step-up (`{ytd['Q1']['median_intinc_to_asset']:.4f}` → `{ytd['Q4']['median_intinc_to_asset']:.4f}`), and FDIC `CHANGEC1` exit mapping (`16,892` censored mergers vs. `2,859` failures vs. `4,313` active). Excludes {dq['failures']['share_last_report_not_scorable']}% non-scorable final quarters (`pit_scorable=False`). |",
-        f"| **Part 3: Processing** | Across **1x–8x (`1.68M–13.46M` rows)** (`POLARS_MAX_THREADS=4`): at `1x`, **Pandas + pushdown** (`{pd1['time_s']:.3f} s`, `{int(pd1['peak_rss_mb']):,} MB`) and **Polars Streaming** (`{ps1['time_s']:.3f} s`, `{int(ps1['peak_rss_mb']):,} MB`) lead; at **8x (`13.46M` rows)**, **Polars Streaming** completes in **`{ps8['time_s']:.3f} s`** (`{int(ps8['peak_rss_mb']):,} MB` RSS, scaling slope **`{ps_s['mb_per_million_rows']:.1f} MB / M rows`** → `~{ps_s['rows_millions_until_16gb']:.1f}M` row limit in 16 GB RAM vs **`{pd_s['mb_per_million_rows']:.1f} MB / M rows`** → `{pd_s['rows_millions_until_16gb']:.1f}M` for Pandas + pushdown). At equal 4 threads, **PySpark `local[4]`** matches Polars with **{parity_sum_plain} precision** (`{sp1_4['total_s']:.3f} s` / `{sp1_4['peak_rss_tree_mb']:,.1f} MB` tree RSS at `1x`; `{sp4_4['total_s']:.3f} s` / `{sp4_4['peak_rss_tree_mb']:,.1f} MB` at `4x`; `local[2]`: `{sp4_2['total_s']:.3f} s`). |",
+        f"| **Part 3: Processing** | Across **1x–8x (`1.68M–13.46M` rows, 8-col core)** (`POLARS_MAX_THREADS=4`): at `1x`, **Pandas + pushdown** (`{pd1['time_s']:.3f} s`, `{int(pd1['peak_rss_mb']):,} MB`) and **Polars Streaming** (`{ps1['time_s']:.3f} s`, `{int(ps1['peak_rss_mb']):,} MB`) lead; at **8x (`13.46M` rows)**, **Polars Streaming** completes in **`{ps8['time_s']:.3f} s`** (`{int(ps8['peak_rss_mb']):,} MB` RSS, slope **`{ps_s['mb_per_million_rows']:.1f} MB / M rows`** → `~{ps_s['rows_millions_until_16gb']:.1f}M` row limit in 16 GB RAM vs **`{pd_s['mb_per_million_rows']:.1f} MB / M rows`** → `{pd_s['rows_millions_until_16gb']:.1f}M` for Pandas + pushdown). On the **full 34-col Bronze → 67-col Gold schema** (`part3_full_schema_benchmark.json`, `1x/2x`), Polars Streaming runs in **`{fs_col_1['time_s']:.3f} s` / `{fs_col_1['peak_rss_mb']:,.1f} MB`** (`1x`) and **`{fs_col_2['time_s']:.3f} s` / `{fs_col_2['peak_rss_mb']:,.1f} MB`** (`2x`), scaling at **`{fs_col_e['mb_per_million_rows']:.1f} MB / M rows`** (`.sink_parquet()`: `{fs_snk_e['mb_per_million_rows']:.1f} MB / M rows`), placing the practical 16 GB laptop ceiling (~12 GB usable) at **`~20M` full-schema rows** (`{fs_col_e['rows_millions_in_12gb_usable']:.1f}M` collect / `{fs_snk_e['rows_millions_in_12gb_usable']:.1f}M` sink). At equal 4 threads, **PySpark `local[4]`** matches Polars with **{parity_sum_plain} precision** (`{sp1_4['total_s']:.3f} s` / `{sp1_4['peak_rss_tree_mb']:,.1f} MB` tree RSS at `1x`; `{sp4_4['total_s']:.3f} s` / `{sp4_4['peak_rss_tree_mb']:,.1f} MB` at `4x`; `local[2]`: `{sp4_2['total_s']:.3f} s`). |",
         "| **Part 4: Features** | 26 point-in-time CAMELS + Texas Ratio + 4Q lag features with CBLR zero-fix & negative stock cleaning; naive full-sample fit shifts upper quantiles up to `20.95%`; invariance & CV purge verified via `pytest`. |",
         "| **Part 5: Modelling** | Walk-forward CV PR-AUC (`760,559` OOF rows, `1,522` OOF failing banks): `HistGradientBoosting, 26 CAMELS` (**0.4624**, ROC **0.9851**, Brier **0.00337**) > `Logistic, 3 variables` (**0.4015**) > `Logistic, 26 CAMELS` (**0.3601**) > `Texas ratio rule` (**0.2642**). Held-out `TEST` (`2009Q1–2025Q2`, `400,332` rows, `485` failing banks): **PR-AUC = 0.5478**, **ROC-AUC = 0.9854**, **Brier = 0.00238**, **Recall@Top-1% = 83.53%**, **Recall@Top-5% = 95.60%** (Modern `2015–2025` ROC-AUC lifted to **0.9193**). Top strictly-`DEV` risk drivers (`feature_importance.csv`): **`texas_ratio`** (`+0.26242` ΔPR-AUC), **`d4_eq_ratio`** (`+0.06486`), **`eq_asset_ratio`** (`+0.06167`). Post-hoc **Canary Case Studies** (`canary_case_studies.csv`): catches **5/5 top GFC closures** (`129–304 d` early) plus *Doral Bank* (`333 d`) & *Republic Bank* (`301 d`). At calibrated **θ\\* = 0.0039** (`C_FP = $250k`/episode, invariant over `$231.1k–$519.9k`), flags **2.894%** of test rows (`43.0` median alerts/qtr) and captures **96.70%** of failing banks (`469 / 485`, `297.0 d` lead); **Top 1%/qtr** catches **82.27%** (`399 / 485`, precision **20.95%**, `210 d` lead). Operational `2026Q2` scoring (`watchlist_2026q2.csv`): scores `4,306` active banks (`26` flagged ≥ θ\\*). Spark MLlib DEV ROC-AUC = **0.9388**. |",
     ])
@@ -1062,60 +1064,114 @@ def _style_docx_report(docx_path: Path) -> None:
     doc.save(str(docx_path))
 
 
-def build_report_pdf_and_docx(md_path: Path) -> Path:
-    """Render report.md to Q1-journal LaTeX PDF (Times New Roman 12pt + TeX Gyre Termes Math) and styled DOCX."""
+def build_report_pdf_and_docx(md_path: Path, strict_pdf: bool = False) -> Path:
+    """Render report.md to Q1-journal LaTeX PDF (Times New Roman 12pt + TeX Gyre Termes Math) and styled DOCX.
+
+    Gracefully skips PDF/DOCX recompilation with a warning when `pandoc`, `xelatex`, or required fonts/LaTeX
+    packages are unavailable (unless `strict_pdf=True`), preserving pre-compiled deliverables so Step 9 and pytest
+    always run on machines without TeX Live/MiKTeX.
+    """
     pdf_path = md_path.parent / "QuanHuuNhatMinh_11230998_Final_Report.pdf"
     docx_path = md_path.parent / "QuanHuuNhatMinh_11230998_Final_Report.docx"
-    resource_path = f"{md_path.parent}:{out_dir('figures')}"
+    resource_path = f"{md_path.parent}{os.pathsep}{out_dir('figures')}"
+
+    pandoc_bin = shutil.which("pandoc")
+    xelatex_bin = shutil.which("xelatex")
+    if pandoc_bin is None:
+        msg = (
+            "pandoc not found on PATH — skipping PDF and DOCX compilation so downstream checks can continue "
+            "(existing pre-compiled files in report/ kept untouched; see README Prerequisites to install pandoc + XeLaTeX)."
+        )
+        if strict_pdf:
+            raise FileNotFoundError(msg)
+        log.warning(msg)
+        return pdf_path
 
     with tempfile.TemporaryDirectory(prefix="bfews_pandoc_") as tmpdir:
         tmp = Path(tmpdir)
         clean_md = tmp / "report_pandoc.md"
         lua_filter = tmp / "filter.lua"
         preamble = tmp / "preamble.tex"
+        tmp_pdf = tmp / "report.pdf"
+        tmp_docx = tmp / "report.docx"
         clean_md.write_text(_prepare_pandoc_markdown(md_path), encoding="utf-8")
         lua_filter.write_text(_PANDOC_LUA_FILTER.lstrip(), encoding="utf-8")
         preamble.write_text(_XELATEX_PREAMBLE.lstrip(), encoding="utf-8")
 
-        subprocess.run(
-            [
-                "pandoc",
-                str(clean_md),
-                "--from=gfm+tex_math_dollars+implicit_figures+fenced_divs",
-                "--pdf-engine=xelatex",
-                f"--lua-filter={lua_filter}",
-                f"--include-in-header={preamble}",
-                f"--resource-path={resource_path}",
-                "-V", "indent=true",
-                "-V", "geometry:margin=0.72in",
-                "-V", "fontsize=12pt",
-                "-V", "mainfont=Times New Roman",
-                "-V", "sansfont=Times New Roman",
-                "-V", "mathfont=texgyretermes-math.otf",
-                "-V", "monofont=Courier New",
-                "-V", "monofontoptions=Scale=0.82",
-                "-V", "colorlinks=true",
-                "-V", "linkcolor=journalblue",
-                "-V", "urlcolor=journalblue",
-                "-o", str(pdf_path),
-            ],
-            check=True,
-        )
-        log.info(f"Compiled Q1-journal LaTeX PDF report (Times New Roman 12pt + TeX Gyre Termes Math) to {pdf_path}")
+        if xelatex_bin is None:
+            msg = (
+                "xelatex not found on PATH — skipping PDF compilation (existing pre-compiled PDF kept untouched; "
+                "install TeX Live `texlive-xetex` or MiKTeX + Times New Roman / Courier New / TeX Gyre Termes Math per README)."
+            )
+            if strict_pdf:
+                raise FileNotFoundError(msg)
+            log.warning(msg)
+        else:
+            try:
+                subprocess.run(
+                    [
+                        pandoc_bin,
+                        str(clean_md),
+                        "--from=gfm+tex_math_dollars+implicit_figures+fenced_divs",
+                        f"--pdf-engine={xelatex_bin}",
+                        f"--lua-filter={lua_filter}",
+                        f"--include-in-header={preamble}",
+                        f"--resource-path={resource_path}",
+                        "-V", "indent=true",
+                        "-V", "geometry:margin=0.72in",
+                        "-V", "fontsize=12pt",
+                        "-V", "mainfont=Times New Roman",
+                        "-V", "sansfont=Times New Roman",
+                        "-V", "mathfont=texgyretermes-math.otf",
+                        "-V", "monofont=Courier New",
+                        "-V", "monofontoptions=Scale=0.82",
+                        "-V", "colorlinks=true",
+                        "-V", "linkcolor=journalblue",
+                        "-V", "urlcolor=journalblue",
+                        "-o", str(tmp_pdf),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                shutil.copy2(tmp_pdf, pdf_path)
+                log.info(f"Compiled Q1-journal LaTeX PDF report (Times New Roman 12pt + TeX Gyre Termes Math) to {pdf_path}")
+            except subprocess.CalledProcessError as exc:
+                if strict_pdf:
+                    if exc.stderr:
+                        log.error(exc.stderr)
+                    raise
+                err_tail = (exc.stderr or exc.stdout or "").strip().splitlines()[-5:]
+                log.warning(
+                    "XeLaTeX PDF compilation skipped after non-zero exit (likely missing system fonts "
+                    "Times New Roman / Courier New / TeX Gyre Termes Math or a TeX package such as mdframed/titlesec); "
+                    "keeping existing pre-compiled PDF untouched so Step 9 and pytest can continue. "
+                    f"Details: {' | '.join(err_tail)}"
+                )
 
-        subprocess.run(
-            [
-                "pandoc",
-                str(clean_md),
-                "--from=gfm+tex_math_dollars+implicit_figures+fenced_divs",
-                f"--lua-filter={lua_filter}",
-                f"--resource-path={resource_path}",
-                "-o", str(docx_path),
-            ],
-            check=True,
-        )
-        _style_docx_report(docx_path)
-        log.info(f"Compiled and styled Q1-journal Word DOCX (Times New Roman 12pt, booktabs, shaded Abstract) to {docx_path}")
+        try:
+            subprocess.run(
+                [
+                    pandoc_bin,
+                    str(clean_md),
+                    "--from=gfm+tex_math_dollars+implicit_figures+fenced_divs",
+                    f"--lua-filter={lua_filter}",
+                    f"--resource-path={resource_path}",
+                    "-o", str(tmp_docx),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            _style_docx_report(tmp_docx)
+            shutil.copy2(tmp_docx, docx_path)
+            log.info(f"Compiled and styled Q1-journal Word DOCX (Times New Roman 12pt, booktabs, shaded Abstract) to {docx_path}")
+        except subprocess.CalledProcessError as exc:
+            if strict_pdf:
+                if exc.stderr:
+                    log.error(exc.stderr)
+                raise
+            log.warning(f"Pandoc DOCX compilation failed; keeping existing pre-compiled DOCX untouched. Details: {exc.stderr}")
 
     return pdf_path
 
@@ -1124,10 +1180,17 @@ build_docx_report = build_report_pdf_and_docx
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--strict-pdf",
+        action="store_true",
+        help="Fail instead of warning if pandoc, xelatex, or required TeX fonts/packages are unavailable.",
+    )
+    args = parser.parse_args()
     build_notebooks()
     sync_benchmarks_into_docs()
     md_path = update_report_metadata()
-    build_report_pdf_and_docx(md_path)
+    build_report_pdf_and_docx(md_path, strict_pdf=args.strict_pdf)
 
 
 if __name__ == "__main__":

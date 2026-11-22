@@ -7,11 +7,12 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib"
+os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "matplotlib"))
 os.environ["POLARS_MAX_THREADS"] = "4"
 
 import polars as pl
@@ -117,7 +118,7 @@ def measure_spark_subprocess(src_p: Path, scale: int, master: str = "local[2]", 
                 rss = sum(pr.memory_info().rss for pr in procs if pr.is_running())
                 if rss > peak_bytes:
                     peak_bytes = rss
-            except psutil.NoSuchProcess:
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
             time.sleep(0.05)
         out, err = proc.communicate()

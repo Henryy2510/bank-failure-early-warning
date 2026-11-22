@@ -47,7 +47,7 @@ def verify_completeness(out: Path) -> bool:
         print(f"Manifest not found at {manifest_p}")
         return False
 
-    manifest = json.loads(manifest_p.read_text())
+    manifest = json.loads(manifest_p.read_text(encoding="utf-8"))
     files = sorted((out / "financials").glob("REPDTE=*.parquet"))
     total_rows = 0
     dup_count = 0

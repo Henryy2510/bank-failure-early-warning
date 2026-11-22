@@ -14,9 +14,20 @@ log = get_logger("spark")
 
 def get_spark_session(app_name: str = "BFT65B-BankFailurePipeline", master: str | None = None):
     """Local SparkSession with a conservative memory configuration for a laptop."""
+    import os
     import re
+    import sys
+    import tempfile
     from pyspark.sql import SparkSession
 
+    os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+    os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
+    derby_home = (Path(tempfile.gettempdir()) / "derby").as_posix()
+    java_opts = (
+        f"-XX:+UseG1GC -Dderby.system.home={derby_home}"
+        if " " not in derby_home
+        else f'-XX:+UseG1GC "-Dderby.system.home={derby_home}"'
+    )
     s = cfg()["spark"]
     m = master or s["master"]
     match = re.fullmatch(r"local\[(\d+)\]", m.strip())
@@ -27,7 +38,7 @@ def get_spark_session(app_name: str = "BFT65B-BankFailurePipeline", master: str 
             .config("spark.default.parallelism", default_par)
             .config("spark.sql.adaptive.enabled", "true")
             .config("spark.ui.enabled", "false")
-            .config("spark.driver.extraJavaOptions", "-XX:+UseG1GC -Dderby.system.home=/tmp/derby")
+            .config("spark.driver.extraJavaOptions", java_opts)
             .getOrCreate())
 
 

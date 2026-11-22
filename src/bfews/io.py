@@ -63,7 +63,7 @@ def raw_dtype_table() -> pl.DataFrame:
 
 
 def manifest() -> dict:
-    return json.loads((raw_dir() / "manifest_financials.json").read_text())
+    return json.loads((raw_dir() / "manifest_financials.json").read_text(encoding="utf-8"))
 
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ cd "$SCRIPT_DIR"
 
 export PYTHONPATH="$SCRIPT_DIR"
 export POLARS_MAX_THREADS="4"
-export MPLCONFIGDIR="/tmp/matplotlib"
+export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib}"
 
 PYTHON="${SCRIPT_DIR}/.venv/bin/python"
 if [ ! -f "$PYTHON" ]; then
@@ -38,7 +38,9 @@ echo "BFT65B: FDIC Bank Failure Early Warning Big-Data Pipeline"
 echo "National Economics University - Big Data Analytics in Finance"
 echo "========================================================================"
 echo "Using Python: $("$PYTHON" --version)"
-echo "Available Memory: $(free -h | awk '/^Mem:/ {print $7}') free of $(free -h | awk '/^Mem:/ {print $2}')"
+if command -v free >/dev/null 2>&1; then
+    echo "Available Memory: $(free -h | awk '/^Mem:/ {print $7}') free of $(free -h | awk '/^Mem:/ {print $2}')"
+fi
 echo "Start Time: $(date)"
 
 run_step "[Step 0/9] Part 1: Verifying Raw FDIC Data Completeness" "$PYTHON" scripts/00_download.py --verify-only

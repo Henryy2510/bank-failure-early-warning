@@ -6,12 +6,16 @@ import json
 import logging
 import multiprocessing as mp
 import os
-import resource
 import sys
 import time
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
+
+try:
+    import resource
+except ImportError:  # Windows has no Unix `resource` module
+    resource = None  # type: ignore[assignment]
 
 import yaml
 
@@ -23,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]  # final/
 
 @lru_cache
 def cfg() -> dict:
-    return yaml.safe_load((ROOT / "config.yaml").read_text())
+    return yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
 
 
 def path(key: str) -> Path:
@@ -71,7 +75,7 @@ def timer(label: str, log: logging.Logger | None = None):
 
 def save_json(obj, p: Path) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(obj, indent=2, default=str))
+    p.write_text(json.dumps(obj, indent=2, default=str), encoding="utf-8")
 
 
 def df_to_markdown(df, floatfmt: str = ".4g") -> str:
@@ -101,9 +105,20 @@ def df_to_markdown(df, floatfmt: str = ".4g") -> str:
 # IMPORTANT: Do NOT pass or return large DataFrames across mp.Queue; only pass
 # lightweight arguments (paths/scalars) and return scalar summaries.
 # ---------------------------------------------------------------------------
+def _peak_rss_mb() -> float:
+    """Cross-platform peak process RSS in MiB (ru_maxrss on Unix, Win32 peak_wset via psutil on Windows)."""
+    if resource is not None:
+        raw = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        # macOS reports ru_maxrss in bytes; Linux reports kilobytes.
+        return raw / (1024 * 1024) if sys.platform == "darwin" else raw / 1024
+    import psutil
+    mi = psutil.Process().memory_info()
+    return float(getattr(mi, "peak_wset", mi.rss)) / (1024 * 1024)
+
+
 def _child(q, fn, args, kwargs):
     os.environ["POLARS_MAX_THREADS"] = "4"
-    base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    base_mb = _peak_rss_mb()
     t0 = time.perf_counter()
     try:
         res = fn(*args, **kwargs)
@@ -115,8 +130,8 @@ def _child(q, fn, args, kwargs):
     except Exception as exc:  # noqa: BLE001
         scalar_res, err = None, repr(exc)
     dt = time.perf_counter() - t0
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    q.put({"seconds": dt, "peak_rss_mb": peak / 1024, "delta_rss_mb": (peak - base) / 1024,
+    peak_mb = _peak_rss_mb()
+    q.put({"seconds": dt, "peak_rss_mb": peak_mb, "delta_rss_mb": peak_mb - base_mb,
            "result": scalar_res, "error": err})
 
 

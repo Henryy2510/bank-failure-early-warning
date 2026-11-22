@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib"
+os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "matplotlib"))
 os.environ["POLARS_MAX_THREADS"] = "4"
 
 import matplotlib.pyplot as plt
