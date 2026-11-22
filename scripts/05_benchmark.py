@@ -7,10 +7,12 @@ Fairness rules
 """
 from __future__ import annotations
 
+import argparse
 import os
 import platform
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -52,14 +54,15 @@ def bench_pandas(src_p: Path, mode: str) -> dict:
     return checksum_pandas(core_pandas(df))
 
 
-def build_scaled_parquet(bronze_p: Path, target_p: Path, scale: int) -> Path:
+def build_scaled_parquet(bronze_p: Path, target_p: Path, scale: int, cols: list[str] | None = None) -> Path:
     """Create a year-partitioned k-times scaled panel with disjoint synthetic CERT offsets in low memory."""
     if scale == 1:
         return bronze_p
     shutil.rmtree(target_p, ignore_errors=True)
     target_p.mkdir(parents=True, exist_ok=True)
+    read_cols = COLS if cols is None else cols
     for year_dir in sorted(bronze_p.glob("YEAR=*")):
-        df_y = pl.read_parquet(year_dir / "part-0.parquet", columns=COLS)
+        df_y = pl.read_parquet(year_dir / "part-0.parquet", columns=read_cols) if read_cols else pl.read_parquet(year_dir / "part-0.parquet")
         parts = [df_y.with_columns((pl.col("CERT") + r * 1_000_000).alias("CERT")) for r in range(scale)]
         out_y = target_p / year_dir.name
         out_y.mkdir(parents=True, exist_ok=True)
@@ -67,6 +70,82 @@ def build_scaled_parquet(bronze_p: Path, target_p: Path, scale: int) -> Path:
             out_y / "part-0.parquet", compression="zstd", compression_level=3, statistics=True, row_group_size=50_000
         )
     return target_p
+
+
+def bench_full_schema_polars(src_p: Path, mode: str) -> dict:
+    """End-to-end Bronze-to-Gold full-schema workload (all 34 cols -> 7 YTD flows -> 26 CAMELS + 4Q lags = 67 cols)."""
+    from src.bfews.features import compute_camels_features
+    from src.bfews.panel import decumulate_ytd_flows
+
+    lf = pl.scan_parquet(src_p, hive_partitioning=True)
+    lf = decumulate_ytd_flows(lf).drop(["year", "quarter", "qidx"])
+    lf = compute_camels_features(lf)
+    if mode == "collect":
+        out = lf.collect(engine="streaming")
+        return {"rows": int(out.height), "cols": len(out.columns)}
+    with tempfile.TemporaryDirectory(prefix="bfews_sink_") as td:
+        out_p = Path(td) / "gold_stream.parquet"
+        lf.sink_parquet(out_p, compression="zstd", compression_level=3, engine="streaming")
+        sch = pl.read_parquet_schema(out_p)
+        n_rows = int(pl.scan_parquet(out_p).select(pl.len()).collect().item())
+        return {"rows": n_rows, "cols": len(sch)}
+
+
+def run_full_schema_benchmark(bronze_p: Path) -> dict:
+    """Measure isolated 1x and 2x peak RSS & time on the full 34-col Bronze -> 67-col Gold pipeline (collect vs sink)."""
+    tmp_root = data_dir("bronze") / "_scale_full_tmp"
+    shutil.rmtree(tmp_root, ignore_errors=True)
+    results = []
+    try:
+        for scale in (1, 2):
+            src_p = bronze_p if scale == 1 else build_scaled_parquet(bronze_p, tmp_root / f"s{scale}", scale, cols=[])
+            for label, mode in (
+                ("Polars streaming (collect)", "collect"),
+                ("Polars streaming (sink_parquet)", "sink"),
+            ):
+                log.info(f"Full-schema {scale}x: {label}")
+                m = measure(bench_full_schema_polars, src_p, mode, repeat=REPEAT)
+                results.append({
+                    "scale": f"{scale}x",
+                    "scale_factor": scale,
+                    "rows": int(m["result"]["rows"]),
+                    "cols": int(m["result"]["cols"]),
+                    "mode": label,
+                    "time_s": round(float(m["median_s"]), 3),
+                    "peak_rss_mb": round(float(m["peak_rss_mb"]), 1),
+                })
+            if scale > 1:
+                shutil.rmtree(tmp_root / f"s{scale}", ignore_errors=True)
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
+    extrap = {}
+    for label in ("Polars streaming (collect)", "Polars streaming (sink_parquet)"):
+        pts = sorted([r for r in results if r["mode"] == label], key=lambda r: r["rows"])
+        x = np.array([p["rows"] / 1e6 for p in pts], dtype=float)
+        y_mem = np.array([p["peak_rss_mb"] for p in pts], dtype=float)
+        y_t = np.array([p["time_s"] for p in pts], dtype=float)
+        slope = float((y_mem[1] - y_mem[0]) / (x[1] - x[0]))
+        icpt = float(y_mem[0] - slope * x[0])
+        t_slope = float((y_t[1] - y_t[0]) / (x[1] - x[0]))
+        extrap[label] = {
+            "fit_points": "two-point (1x, 2x) linear estimate",
+            "intercept_mb": round(icpt, 1),
+            "mb_per_million_rows": round(slope, 1),
+            "seconds_per_million_rows": round(t_slope, 3),
+            "rows_millions_in_12gb_usable": round(float((12.0 * 1024 - icpt) / max(1.0, slope)), 1),
+            "rows_millions_in_16gb_raw": round(float((16.0 * 1024 - icpt) / max(1.0, slope)), 1),
+        }
+
+    payload = {
+        "workload": "End-to-end Bronze 34-col Hive scan -> sort(CERT, REPDTE) -> 7 YTD flows -> 26 CAMELS + 4Q lags (67 output cols)",
+        "repeat": REPEAT,
+        "results": results,
+        "extrapolation": extrap,
+    }
+    save_json(payload, out_dir("tables") / "part3_full_schema_benchmark.json")
+    log.info(f"Saved full-schema benchmark to outputs/tables/part3_full_schema_benchmark.json: {extrap}")
+    return payload
 
 
 def capture_polars_plan(bronze_p: Path) -> str:
@@ -212,7 +291,14 @@ def plot(res: pl.DataFrame, spark_df: pl.DataFrame | None = None) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Part 3 multi-scale Polars vs pandas benchmark.")
+    parser.add_argument("--full-schema-only", action="store_true", help="Run only the reproducible 1x/2x full-schema benchmark.")
+    args = parser.parse_args()
+
     bronze_p = bronze_financials_path()
+    if args.full_schema_only:
+        run_full_schema_benchmark(bronze_p)
+        return
     save_benchmark_environment()
     capture_polars_plan(bronze_p)
     res = run(bronze_p)
@@ -221,6 +307,7 @@ def main() -> None:
     cap = capacity_extrapolation(res)
     save_json(cap, out_dir("tables") / "part3_capacity_extrapolation.json")
     log.info(f"Capacity extrapolation (estimate): {cap}")
+    run_full_schema_benchmark(bronze_p)
     plot(res)
 
 

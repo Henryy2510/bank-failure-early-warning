@@ -30,6 +30,9 @@ def main() -> None:
     watchlist_summary = json.loads((out_dir("tables") / "watchlist_2026q2_summary.json").read_text(encoding="utf-8"))
     dq_summary = json.loads((out_dir("tables") / "dq_summary.json").read_text(encoding="utf-8"))
     cfp_stab = json.loads((out_dir("tables") / "cfp_stability_interval.json").read_text(encoding="utf-8"))
+    full_s = json.loads((out_dir("tables") / "part3_full_schema_benchmark.json").read_text(encoding="utf-8"))
+    fs_col_e = full_s["extrapolation"]["Polars streaming (collect)"]
+    fs_snk_e = full_s["extrapolation"]["Polars streaming (sink_parquet)"]
     full_bench = {
         r["engine"]: r
         for r in bench_df.filter(pl.col("scale") == "1x").iter_rows(named=True)
@@ -85,7 +88,10 @@ def main() -> None:
         "3,192",
         "Table A2.",
         "2007-12-31",
-        "663.7 MB",
+        "part3_full_schema_benchmark.json",
+        f"{fs_col_e['mb_per_million_rows']:.1f} MB",
+        f"{fs_snk_e['mb_per_million_rows']:.1f} MB",
+        f"{fs_col_e['rows_millions_in_12gb_usable']:.1f} million",
         "16.1%",
         "CERT 33802",
     ]
@@ -239,6 +245,8 @@ def main() -> None:
         "87,172",
         "data/fdic_download_starter.py",
         "cryptographically locked",
+        "30–50 million",
+        "30-50 million",
     ]
     stale_found = [
         tok for tok in stale_tokens if (tok in report_txt or tok in readme_txt)

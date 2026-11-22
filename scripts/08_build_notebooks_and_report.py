@@ -154,6 +154,8 @@ def build_notebooks():
                 "code",
                 "bench = pl.read_csv('../outputs/tables/part3_benchmark_results.csv')\n"
                 "print('=== Part 3 Multi-Scale (1x-8x) Benchmark ===')\nprint(bench)\n"
+                "print('\\n=== Full 34-Col Bronze -> 67-Col Gold Benchmark (collect vs sink_parquet) ===')\n"
+                "print(Path('../outputs/tables/part3_full_schema_benchmark.json').read_text())\n"
                 "print('\\n=== PySpark Multi-Scale (1x & 4x) Python+JVM RSS ===')\n"
                 "print(pl.read_csv('../outputs/tables/spark_scaling_results.csv'))",
             ),
@@ -284,6 +286,14 @@ def sync_benchmarks_into_docs() -> None:
     p1 = {r["format"]: r for r in pl.read_csv(tdir / "part1_storage_benchmark.csv").iter_rows(named=True)}
     p3 = {(r["scale"], r["engine"]): r for r in pl.read_csv(tdir / "part3_benchmark_results.csv").iter_rows(named=True)}
     cap = json.loads((tdir / "part3_capacity_extrapolation.json").read_text(encoding="utf-8"))
+    full_s = json.loads((tdir / "part3_full_schema_benchmark.json").read_text(encoding="utf-8"))
+    fs_res = {(r["scale"], r["mode"]): r for r in full_s["results"]}
+    fs_col_1 = fs_res[("1x", "Polars streaming (collect)")]
+    fs_col_2 = fs_res[("2x", "Polars streaming (collect)")]
+    fs_snk_1 = fs_res[("1x", "Polars streaming (sink_parquet)")]
+    fs_snk_2 = fs_res[("2x", "Polars streaming (sink_parquet)")]
+    fs_col_e = full_s["extrapolation"]["Polars streaming (collect)"]
+    fs_snk_e = full_s["extrapolation"]["Polars streaming (sink_parquet)"]
     sp = {(r["scale"], r["engine"]): r for r in pl.read_csv(tdir / "spark_scaling_results.csv").iter_rows(named=True)}
     parity = json.loads((tdir / "spark_polars_parity.json").read_text(encoding="utf-8"))
     f32 = {r["column"]: r for r in pl.read_csv(tdir / "part1_float32_check.csv").iter_rows(named=True)}
@@ -325,20 +335,25 @@ def sync_benchmarks_into_docs() -> None:
     sp1_4, sp4_4 = sp[("1x", "PySpark local[4]")], sp[("4x", "PySpark local[4]")]
     parity_sum_sci = _format_latex_sci(float(parity["yearly_fingerprint"]["max_relative_diff_of_sums"]))
 
+    fs_slope_ratio = fs_col_e["mb_per_million_rows"] / ps_s["mb_per_million_rows"]
     q1_block = (
         f"On Q1 (storage, laptop processing, and Spark cluster justification), four decades of quarterly bank reports "
         f"(1.68 million rows across 33 fields) are best stored as Hive-partitioned Apache Parquet (`YEAR=YYYY`) with Zstandard level-3 compression, "
         f"canonical Arrow typing (Int32 keys, Date32 dates, Float64 measures), and sorted (REPDTE, CERT) row groups, compressing raw CSV storage by "
         f"{hive_r['compression_vs_csv']:.2f}x ({csv_r['size_mb']:.1f} MB to {hive_r['size_mb']:.1f} MB; write time {hive_r['write_s']:.3f} s). "
         f"On a 1x–8x stress test up to 13.46 million synthetically replicated rows ({env['cpu_logical']} logical CPUs, {env['ram_total_gb']:.2f} GB RAM, 4 Polars threads, median of 3 fresh `spawn` runs), "
-        f"Polars Streaming finishes in {ps8['time_s']:.3f} s ({int(ps8['peak_rss_mb']):,} MB peak RSS; Polars Lazy: {pl8['time_s']:.3f} s / {int(pl8['peak_rss_mb']):,} MB), "
-        f"scaling at {ps_s['mb_per_million_rows']:.1f} MB per million rows (extrapolated {ps_s['rows_millions_until_16gb']:.1f}-million-row ceiling on the 8-column core workload in 16 GB RAM) "
+        f"Polars Streaming finishes the 8-column core workload in {ps8['time_s']:.3f} s ({int(ps8['peak_rss_mb']):,} MB peak RSS; Polars Lazy: {pl8['time_s']:.3f} s / {int(pl8['peak_rss_mb']):,} MB), "
+        f"scaling at {ps_s['mb_per_million_rows']:.1f} MB per million rows (extrapolated {ps_s['rows_millions_until_16gb']:.1f}-million-row ceiling in 16 GB RAM) "
         f"versus {pd_s['mb_per_million_rows']:.1f} MB per million rows for Pandas with pushdown ({pd_s['rows_millions_until_16gb']:.1f}-million-row ceiling; "
-        f"{int(pn1['peak_rss_mb']):,} MB at 1x for naive Pandas). Directly measuring the full 70-column Gold feature pipeline in isolated Polars Streaming runs yields 2,133.6 MB peak RSS at 1x (0.477 s) and 3,250.3 MB at 2x (0.804 s)—a 663.7 MB per million-row slope (6.57x steeper than the 8-column core)—empirically anchoring the practical 16 GB laptop limit at 20–40 million materialized full-schema rows (30–50 million rows when streaming to disk). "
+        f"{int(pn1['peak_rss_mb']):,} MB at 1x for naive Pandas). Directly measuring the end-to-end 34-column Bronze-to-67-column Gold pipeline "
+        f"(`outputs/tables/part3_full_schema_benchmark.json`, two-point 1x/2x estimate) yields {fs_col_e['mb_per_million_rows']:.1f} MB per million rows for `.collect()` "
+        f"({fs_col_e['rows_millions_in_12gb_usable']:.1f} million rows in 12 GB usable RAM; {fs_col_e['rows_millions_in_16gb_raw']:.1f} million raw) and "
+        f"{fs_snk_e['mb_per_million_rows']:.1f} MB per million rows for `.sink_parquet()` ({fs_snk_e['rows_millions_in_12gb_usable']:.1f} million usable), "
+        f"empirically placing the practical 16 GB laptop ceiling at roughly 20 million full-schema rows. "
         f"At equal 4-thread concurrency, PySpark 4.3 (`local[4]`) reproduces identical numeric outputs "
         f"(${parity_sum_sci}$ yearly-sum parity, $0.000$ sample max diff) in {sp1_4['total_s']:.3f} s at 1x ({sp1_4['peak_rss_tree_mb']:,.1f} MB tree RSS) and "
         f"{sp4_4['total_s']:.3f} s at 4x (6.73 million rows, {sp4_4['peak_rss_tree_mb']:,.1f} MB tree RSS; `local[2]`: {sp4_2['total_s']:.3f} s). "
-        f"A distributed Spark cluster is therefore unnecessary for bank-level Call Reports below 30–50 million rows and becomes justified only when expanding to "
+        f"A distributed Spark cluster is therefore unnecessary for bank-level Call Reports below roughly 20 million full-schema rows on a 16 GB laptop and becomes justified only when expanding to "
         f"wide multi-schedule regulatory panels, borrower-level credit registries exceeding $10^8$ rows, or high-frequency interbank payment streams spanning tens to hundreds of gigabytes."
     )
 
@@ -383,7 +398,10 @@ def sync_benchmarks_into_docs() -> None:
         f"already consuming {ram_pct_more}% more memory than Polars Streaming at 4x ({int(pd4['peak_rss_mb']):,} MB vs. {int(ps4['peak_rss_mb']):,} MB) and exhausting 16 GB RAM by roughly {pd_s['rows_millions_until_16gb']:.1f} million rows. "
         f"By contrast, Polars Streaming executes pipelined Rust operators over bounded morsels, flattening peak-memory growth to {ps_s['mb_per_million_rows']:.1f} MB per million rows "
         f"(a {slope_ratio:.2f}x shallower slope; {ps_s['seconds_per_million_rows']:.3f} s per million rows), yielding an upper-bound ceiling of {ps_s['rows_millions_until_16gb']:.1f} million rows for the 8-column core benchmark inside 16 GB RAM. "
-        f"To replace heuristic scaling factors with a direct measurement on the production schema, we also executed Polars Streaming over the full 70-column Gold feature pipeline (34 regulatory columns, 7 de-cumulated flows, 26 CAMELS features, and PIT flags) in isolated subprocesses: peak RSS reaches 2,133.6 MB at 1x (0.477 s) and 3,250.3 MB at 2x (0.804 s), giving an empirical full-schema slope of 663.7 MB per million rows (6.57x steeper than the 8-column core). After reserving 3–4 GB for the OS, Python runtime, and tree-ensemble training buffers on a 16 GB laptop, a materialized 70-column panel saturates RAM around 20 million rows and a disk-streaming full-schema workflow reaches roughly 30–50 million rows.\n\n"
+        f"Because real production runs process wider schemas, we also benchmarked the full end-to-end Bronze-to-Gold pipeline (`scripts/05_benchmark.py`; `outputs/tables/part3_full_schema_benchmark.json`)—scanning all 34 Bronze columns, sorting by (CERT, REPDTE), de-cumulating all 7 YTD flows, and computing all 26 CAMELS features plus 4Q lags (67 output columns; median of 3 fresh `spawn` runs). "
+        f"In `.collect(engine=\"streaming\")`, runtime rises to {fs_col_1['time_s']:.3f} s ({fs_col_1['peak_rss_mb']:,.1f} MB) at 1x and {fs_col_2['time_s']:.3f} s ({fs_col_2['peak_rss_mb']:,.1f} MB) at 2x—a rough two-point slope of {fs_col_e['mb_per_million_rows']:.1f} MB per million rows ({fs_slope_ratio:.2f}x steeper than the 8-column core; intercept {fs_col_e['intercept_mb']:.1f} MB), limiting a 16 GB laptop (~12 GB usable after OS/runtime overhead) to {fs_col_e['rows_millions_in_12gb_usable']:.1f} million rows ({fs_col_e['rows_millions_in_16gb_raw']:.1f} million raw). "
+        f"Streaming directly to disk via `.sink_parquet()` yields virtually identical peak RSS ({fs_snk_1['peak_rss_mb']:,.1f} MB / {fs_snk_1['time_s']:.3f} s at 1x; {fs_snk_2['peak_rss_mb']:,.1f} MB / {fs_snk_2['time_s']:.3f} s at 2x; slope {fs_snk_e['mb_per_million_rows']:.1f} MB per million rows $\\rightarrow$ {fs_snk_e['rows_millions_in_12gb_usable']:.1f} million usable rows) because global `(CERT, REPDTE)` sorting and cross-year `.over(\"CERT\")` window operators act as blocking pipeline breakers that must retain sorted state in memory. "
+        f"Empirically, single-laptop capacity on the full 67-column production schema therefore saturates around 20 million rows.\n\n"
         f"![Multi-scale execution time and peak RSS memory scaling across Polars, Pandas, and PySpark (1x–8x).](../outputs/figures/part3_scaling_benchmark.png)\n\n"
         f"### 4.3 PySpark Reproduction, Parity Verification, and Cluster Justification\n\n"
         f"In `scripts/06_spark.py` (1.2 GB driver memory), PySpark Catalyst reproduces Polars outputs identically across all 43 annual partitions, achieving a 0.0 maximum absolute difference across 33,042 sampled rows "
@@ -401,7 +419,7 @@ def sync_benchmarks_into_docs() -> None:
         f"and requires {sp4_4['total_s']:.3f} s total ({sp4_4['compute_s']:.3f} s compute, {sp4_4['peak_rss_tree_mb']:,.1f} MB Python+JVM tree RSS) at 6.73 million rows compared with {ps4['time_s']:.3f} s in 4-thread Polars Streaming—"
         f"{spark_slowdown_4t:.1f}x slower end-to-end and {spark_compute_slowdown_4t:.1f}x slower compute-only, while `local[2]` requires {sp4_2['total_s']:.3f} s and {sp4_2['peak_rss_tree_mb']:,.1f} MB tree RSS. "
         f"Doubling Spark's local thread count trims total latency by only {(1.0 - sp4_4['total_s'] / sp4_2['total_s']) * 100.0:.1f}%, confirming that JVM startup and shuffle barriers rather than core count dominate local latency. "
-        f"Consequently, a distributed Spark cluster is unwarranted for quarterly bank-level Call Reports below our derived 30–50 million full-schema row threshold and becomes justified only when wide multi-schedule expansions, borrower-level credit registries (>100 million rows), or daily payment streams span tens to hundreds of gigabytes beyond single-node RAM."
+        f"Consequently, a distributed Spark cluster is unwarranted for quarterly bank-level Call Reports below our measured ~20-million full-schema row 16 GB laptop ceiling (151 million rows for narrow 8-column slices) and becomes justified only when wide multi-schedule expansions, borrower-level credit registries (>100 million rows), or daily payment streams span tens to hundreds of gigabytes requiring external disk-spilling shuffles."
     )
 
     md_path = ROOT / "report" / "report.md"

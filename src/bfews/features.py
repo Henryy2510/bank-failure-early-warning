@@ -46,8 +46,9 @@ def compute_camels_features(df: pl.DataFrame) -> pl.DataFrame:
     log.info("Computing CAMELS ratios and Texas ratio...")
     df = add_time_keys(df)
     # Sanitize impossible negative stock balances before ratio calculation (<=0.04% of rows)
+    col_names = df.collect_schema().names() if isinstance(df, pl.LazyFrame) else df.columns
     df = df.with_columns(
-        [pl.when(pl.col(c) < 0).then(None).otherwise(pl.col(c)).alias(c) for c in NONNEG_STOCKS if c in df.columns]
+        [pl.when(pl.col(c) < 0).then(None).otherwise(pl.col(c)).alias(c) for c in NONNEG_STOCKS if c in col_names]
     )
 
     pre_basel = pl.col("year") < 1990

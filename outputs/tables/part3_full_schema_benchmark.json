@@ -1,0 +1,60 @@
+{
+  "workload": "End-to-end Bronze 34-col Hive scan -> sort(CERT, REPDTE) -> 7 YTD flows -> 26 CAMELS + 4Q lags (67 output cols)",
+  "repeat": 3,
+  "results": [
+    {
+      "scale": "1x",
+      "scale_factor": 1,
+      "rows": 1682616,
+      "cols": 67,
+      "mode": "Polars streaming (collect)",
+      "time_s": 1.83,
+      "peak_rss_mb": 1597.7
+    },
+    {
+      "scale": "1x",
+      "scale_factor": 1,
+      "rows": 1682616,
+      "cols": 67,
+      "mode": "Polars streaming (sink_parquet)",
+      "time_s": 2.932,
+      "peak_rss_mb": 1563.8
+    },
+    {
+      "scale": "2x",
+      "scale_factor": 2,
+      "rows": 3365232,
+      "cols": 67,
+      "mode": "Polars streaming (collect)",
+      "time_s": 3.475,
+      "peak_rss_mb": 2631.7
+    },
+    {
+      "scale": "2x",
+      "scale_factor": 2,
+      "rows": 3365232,
+      "cols": 67,
+      "mode": "Polars streaming (sink_parquet)",
+      "time_s": 5.031,
+      "peak_rss_mb": 2684.9
+    }
+  ],
+  "extrapolation": {
+    "Polars streaming (collect)": {
+      "fit_points": "two-point (1x, 2x) linear estimate",
+      "intercept_mb": 563.7,
+      "mb_per_million_rows": 614.5,
+      "seconds_per_million_rows": 0.978,
+      "rows_millions_in_12gb_usable": 19.1,
+      "rows_millions_in_16gb_raw": 25.7
+    },
+    "Polars streaming (sink_parquet)": {
+      "fit_points": "two-point (1x, 2x) linear estimate",
+      "intercept_mb": 442.7,
+      "mb_per_million_rows": 666.3,
+      "seconds_per_million_rows": 1.247,
+      "rows_millions_in_12gb_usable": 17.8,
+      "rows_millions_in_16gb_raw": 23.9
+    }
+  }
+}

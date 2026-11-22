@@ -353,6 +353,7 @@ def test_upgrade_artifacts_present():
         "model_curves_data.json",
         "cfp_stability_interval.json",
         "frozen_protocol.json",
+        "part3_full_schema_benchmark.json",
     ]
     for name in required_tables:
         p = tdir / name
