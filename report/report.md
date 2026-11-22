@@ -385,7 +385,11 @@ National Assembly of Vietnam (2024), *Law on Credit Institutions No. 32/2024/QH1
 
 Shumway, T. (2001), “Forecasting bankruptcy more accurately: a simple hazard model”, *The Journal of Business*, Vol. 74 No. 1, pp. 101–124.
 
-State Bank of Vietnam (SBV) (2024), *Circular No. 31/2024/TT-NHNN on Classification of Assets of Commercial Banks* (as amended by Circular No. 37/2025/TT-NHNN), Hanoi, Vietnam.
+State Bank of Vietnam (SBV) (2016), *Circular No. 41/2016/TT-NHNN on Capital Adequacy Ratios for Banks and Foreign Bank Branches*, Hanoi, Vietnam.
+
+State Bank of Vietnam (SBV) (2023), *Circular No. 02/2023/TT-NHNN on Debt Restructuring and Loan-Group Retention* (extended by Circular No. 06/2024/TT-NHNN through 31 December 2024; preceded by Circular No. 01/2020/TT-NHNN), Hanoi, Vietnam.
+
+State Bank of Vietnam (SBV) (2024), *Circular No. 31/2024/TT-NHNN on Classification of Assets of Commercial Banks, Non-Bank Credit Institutions, and Foreign Bank Branches* (as amended by Circular No. 37/2025/TT-NHNN; replacing Circular No. 11/2021/TT-NHNN), Hanoi, Vietnam.
 
 State Bank of Vietnam (SBV) (2025), *Circular No. 14/2025/TT-NHNN on Capital Adequacy Ratios for Commercial Banks and Foreign Bank Branches*, Hanoi, Vietnam.
 

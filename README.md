@@ -204,7 +204,8 @@ Both runners execute Steps `00` through `09`, log per-step wall-clock times to `
 ## 5. Academic Integrity & Citations
 
 1. **Primary Data Source & Official Institutional References:**  
-   US Federal Deposit Insurance Corporation (FDIC) BankFind Suite Public API (`https://api.fdic.gov/banks`), RISView Call Report Field Dictionary (`https://api.fdic.gov/banks/docs/`), FDIC 2024 Annual Report, and FDIC Proposed 2025 Operating Budget. Acquisition logic builds upon the optional course starter script `fdic_download_starter.py`.
+   * US Federal Deposit Insurance Corporation (FDIC): BankFind Suite Public API (`https://api.fdic.gov/banks`), RISView Call Report Field Dictionary (`https://api.fdic.gov/banks/docs/`), FDIC 2024 Annual Report, and FDIC Proposed 2025 Operating Budget. Acquisition logic builds upon the optional course starter script `fdic_download_starter.py`.
+   * Vietnam Banking Legal & Regulatory Framework (for Section 7.3 SBV adaptation): National Assembly of Vietnam *Law on Credit Institutions No. 32/2024/QH15* (as amended by Laws No. 43/2024/QH15 and 96/2025/QH15); State Bank of Vietnam (SBV) *Circular No. 41/2016/TT-NHNN* (Basel II CAR), *Circular No. 01/2020/TT-NHNN* & *Circular No. 02/2023/TT-NHNN* (extended by *Circular No. 06/2024/TT-NHNN*, expired 31 Dec 2024), *Circular No. 31/2024/TT-NHNN* (asset classification, as amended by *Circular No. 37/2025/TT-NHNN*, replacing *Circular No. 11/2021/TT-NHNN*), *Circular No. 14/2025/TT-NHNN* (Basel III-aligned CAR), and *Circular No. 05/2026/TT-NHNN* (VND 350 million deposit insurance payout cap, effective 13 July 2026).
 2. **Academic Literature:**  
    * Wheelock, D. C., & Wilson, P. W. (2000). *Why do banks disappear? The determinants of U.S. bank failures and acquisitions.* Review of Economics and Statistics, 82(1), 127–138.  
    * Shumway, T. (2001). *Forecasting bankruptcy more accurately: A simple hazard model.* The Journal of Business, 74(1), 101–124.  
