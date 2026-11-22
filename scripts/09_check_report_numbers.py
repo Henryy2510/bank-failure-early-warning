@@ -85,6 +85,9 @@ def main() -> None:
         "3,192",
         "Table A2.",
         "2007-12-31",
+        "663.7 MB",
+        "16.1%",
+        "CERT 33802",
     ]
 
     for row in cv_df.iter_rows(named=True):
