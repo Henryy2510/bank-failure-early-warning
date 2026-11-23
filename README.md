@@ -207,10 +207,19 @@ Both runners execute Steps `00` through `09`, log per-step wall-clock times to `
    * US Federal Deposit Insurance Corporation (FDIC): BankFind Suite Public API (`https://api.fdic.gov/banks`), RISView Call Report Field Dictionary (`https://api.fdic.gov/banks/docs/`), FDIC 2024 Annual Report, and FDIC Proposed 2025 Operating Budget. Acquisition logic builds upon the optional course starter script `fdic_download_starter.py`.
    * Vietnam Banking Legal & Regulatory Framework (for Section 7.3 SBV adaptation): National Assembly of Vietnam *Law on Credit Institutions No. 32/2024/QH15* (as amended by Laws No. 43/2024/QH15 and 96/2025/QH15); State Bank of Vietnam (SBV) *Circular No. 41/2016/TT-NHNN* (Basel II CAR), *Circular No. 01/2020/TT-NHNN* & *Circular No. 02/2023/TT-NHNN* (extended by *Circular No. 06/2024/TT-NHNN*, expired 31 Dec 2024), *Circular No. 31/2024/TT-NHNN* (asset classification, as amended by *Circular No. 37/2025/TT-NHNN*, replacing *Circular No. 11/2021/TT-NHNN*), *Circular No. 14/2025/TT-NHNN* (Basel III-aligned CAR), and *Circular No. 05/2026/TT-NHNN* (VND 350 million deposit insurance payout cap, effective 13 July 2026).
 2. **Academic Literature:**  
-   * Wheelock, D. C., & Wilson, P. W. (2000). *Why do banks disappear? The determinants of U.S. bank failures and acquisitions.* Review of Economics and Statistics, 82(1), 127–138.  
-   * Shumway, T. (2001). *Forecasting bankruptcy more accurately: A simple hazard model.* The Journal of Business, 74(1), 101–124.  
-   * Cole, R. A., & White, L. J. (2012). *Déjà vu all over again: The causes of U.S. commercial bank failures this time around.* Journal of Financial Services Research, 42(1), 5–29.  
-   * Elkan, C. (2001). *The foundations of cost-sensitive learning.* Proceedings of the 17th International Joint Conference on Artificial Intelligence (IJCAI), 973–978.
+   * Cole, R. A., & White, L. J. (2012). Déjà vu all over again: The causes of U.S. commercial bank failures this time around. *Journal of Financial Services Research, 42*(1), 5–29.
+   * Elkan, C. (2001). The foundations of cost-sensitive learning. In *Proceedings of the 17th International Joint Conference on Artificial Intelligence* (pp. 973–978). IJCAI.
+   * Federal Deposit Insurance Corporation. (2024). *2024 annual report: Division of Risk Management Supervision examination counts*.
+   * Federal Deposit Insurance Corporation. (2025). *Proposed 2025 operating budget: Division of Risk Management Supervision ongoing operations budget*.
+   * Federal Deposit Insurance Corporation. (2026). *BankFind Suite Public API and RISView field dictionary*. https://api.fdic.gov/banks/docs/
+   * National Assembly of Vietnam. (2024). *Law on Credit Institutions No. 32/2024/QH15* (as amended by Laws No. 43/2024/QH15 and 96/2025/QH15).
+   * Shumway, T. (2001). Forecasting bankruptcy more accurately: A simple hazard model. *The Journal of Business, 74*(1), 101–124.
+   * State Bank of Vietnam. (2016). *Circular No. 41/2016/TT-NHNN on capital adequacy ratios for banks and foreign bank branches*.
+   * State Bank of Vietnam. (2023). *Circular No. 02/2023/TT-NHNN on debt restructuring and loan-group retention* (extended by Circular No. 06/2024/TT-NHNN; preceded by Circular No. 01/2020/TT-NHNN).
+   * State Bank of Vietnam. (2024). *Circular No. 31/2024/TT-NHNN on classification of assets of commercial banks, non-bank credit institutions, and foreign bank branches* (as amended by Circular No. 37/2025/TT-NHNN; replacing Circular No. 11/2021/TT-NHNN).
+   * State Bank of Vietnam. (2025). *Circular No. 14/2025/TT-NHNN on capital adequacy ratios for commercial banks and foreign bank branches*.
+   * State Bank of Vietnam. (2026). *Circular No. 05/2026/TT-NHNN on the deposit insurance payout limit*.
+   * Wheelock, D. C., & Wilson, P. W. (2000). Why do banks disappear? The determinants of U.S. bank failures and acquisitions. *Review of Economics and Statistics, 82*(1), 127–138.
 3. **External Code & Reference Repositories (Cited & Critically Improved):**  
    * `batuhanisik751/bank-failure-early-warning` ([GitHub](https://github.com/batuhanisik751/bank-failure-early-warning)): Consulted for CAMELS/Texas Ratio baseline and walk-forward cost intuition; upgraded to Bronze/Silver/Gold Polars + PySpark, Elkan prior-odds calibration, episode cost, and capacity budgets.  
    * `Tajaddin/bank-early-warning` ([GitHub](https://github.com/Tajaddin/bank-early-warning)): R/SQL supervisory econometrics inspiration; upgraded to 1.68M-row Polars/Spark processing with HGB permutation importance paired with standardized Logit directionality.  
