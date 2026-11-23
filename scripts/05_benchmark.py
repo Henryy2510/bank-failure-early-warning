@@ -275,7 +275,7 @@ def plot(res: pl.DataFrame, spark_df: pl.DataFrame | None = None) -> None:
             a2.plot(sd["rows"] / 1e6, sd["peak_rss_tree_mb"], marker=mk, markersize=ms, linestyle=ls, color=col, lw=2,
                     label=f"{sp_eng} (Python + JVM RSS)")
     a1.set_xlabel("Panel Rows (Millions, Synthetic Replication 1x–8x)")
-    a1.set_ylabel("Wall-Clock Time (seconds, median)")
+    a1.set_ylabel("Wall-Clock Time (seconds)")
     a1.set_title("Multi-Scale Execution Time Scaling")
     a2.set_xlabel("Panel Rows (Millions, Synthetic Replication 1x–8x)")
     a2.set_ylabel("Peak RSS Memory (MB)")

@@ -144,10 +144,14 @@ def download_financials(out: Path, quarters: list[str]) -> None:
         if df.empty:
             print(f"[{i}/{len(quarters)}] {q}: no data (quarter not published yet?)")
             continue
-        df.to_parquet(target, index=False)  # pyarrow engine, snappy compression
         complete = len(df) == total and not df.duplicated(["CERT", "REPDTE"]).any()
+        tmp_target = fin_dir / f".REPDTE={q}.parquet.tmp"
+        df.to_parquet(tmp_target, index=False)  # pyarrow engine, snappy compression
+        tmp_target.replace(target)
         manifest[q] = {"rows": len(df), "api_total": total, "complete": bool(complete)}
-        manifest_path.write_text(json.dumps(manifest, indent=1))  # save after every quarter
+        tmp_manifest = out / ".manifest_financials.json.tmp"
+        tmp_manifest.write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+        tmp_manifest.replace(manifest_path)  # atomic save after every quarter
         print(f"[{i}/{len(quarters)}] {q}: {len(df):>6,} rows (API total {total:,}) "
               f"{'OK' if complete else 'INCOMPLETE'}  {time.time() - t0:5.1f}s")
 

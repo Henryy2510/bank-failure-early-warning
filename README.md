@@ -89,7 +89,7 @@ final/
 ├── report/                            # Final Research Report deliverables
 │   ├── report.md                      # Full English report in GitHub Markdown
 │   ├── QuanHuuNhatMinh_11230998_Final_Report.docx       # Formatted Word document with embedded tables and figures
-│   └── QuanHuuNhatMinh_11230998_Final_Report.pdf        # Final PDF report (20 main pages + 2-page appendix; <= 20 main + <= 10 appendix)
+│   └── QuanHuuNhatMinh_11230998_Final_Report.pdf        # Final PDF report (20 main pages + 4-page appendix; <= 20 main + <= 10 appendix)
 └── tests/
     └── test_pipeline.py               # Automated pytest suite (20 tests: completeness, de-YTD, CBLR zero-fix, forbidden cols, post-failure filter, CV purge, leakage invariance, C_FP stability interval, frozen_protocol manifest, Spark local[2]/local[4] parity, non-degenerate cost threshold, README paths, PDF pages)
 ```

@@ -101,6 +101,11 @@ def build_notebooks():
                 "bronze_files = list(Path('../data/bronze/financials').rglob('*.parquet'))\n"
                 "print(f'Bronze partition count: {len(bronze_files)} files across {len({p.parent for p in bronze_files})} year folders')",
             ),
+            (
+                "code",
+                "from IPython.display import Image, display\n"
+                "display(Image(filename='../outputs/figures/part1_storage_comparison.png'))",
+            ),
         ],
         nb_dir / "01_acquisition_and_storage.ipynb",
     )
@@ -133,6 +138,21 @@ def build_notebooks():
                 "panel_schema = pl.read_parquet_schema('../data/silver/panel.parquet')\n"
                 "print(f'Silver panel columns ({len(panel_schema)}):', list(panel_schema.keys())[:15], '...')",
             ),
+            (
+                "code",
+                "import sys, datetime\nfrom pathlib import Path\nfrom IPython.display import Image, display\n"
+                "sys.path.insert(0, str(Path.cwd().parent))\nfrom src.bfews.panel import decumulate_ytd_flows\n\n"
+                "# Live unit verification of guarded YTD flow de-cumulation across a missing Q2 gap\n"
+                "toy = pl.DataFrame({\n"
+                "    'CERT': [1, 1, 1], 'REPDTE': [datetime.date(2022, 3, 31), datetime.date(2022, 9, 30), datetime.date(2022, 12, 31)],\n"
+                "    'NETINC': [100.0, 350.0, 500.0], 'INTINC': [50.0, 170.0, 240.0], 'EINTEXP': [10.0, 35.0, 50.0],\n"
+                "    'NONII': [5.0, 15.0, 22.0], 'NONIX': [20.0, 65.0, 90.0], 'ELNATR': [4.0, 12.0, 18.0], 'NTLNLS': [2.0, 7.0, 11.0],\n"
+                "})\n"
+                "dec = decumulate_ytd_flows(toy).select(['REPDTE', 'NETINC', 'NETINC_Q'])\n"
+                "print('Guarded de-cumulation (Q3 after missing Q2 stays null; Q4 = 500 - 350 = 150):')\nprint(dec)\n"
+                "assert dec['NETINC_Q'].to_list() == [100.0, None, 150.0]\n"
+                "display(Image(filename='../outputs/figures/missingness_by_era.png'))",
+            ),
         ],
         nb_dir / "02_data_quality_and_panel.ipynb",
     )
@@ -163,12 +183,13 @@ def build_notebooks():
             ),
             (
                 "code",
-                "import json\n"
+                "import json\nfrom IPython.display import Image, display\n"
                 "parity = json.loads(Path('../outputs/tables/spark_polars_parity.json').read_text(encoding='utf-8'))\n"
                 "print('=== PySpark vs Polars Parity Check ===')\n"
                 "print(json.dumps(parity, indent=2))\n"
                 "print('\\n=== PySpark Catalyst Execution Plan (Excerpt) ===')\n"
-                "print(Path('../outputs/tables/spark_execution_plan.txt').read_text(encoding='utf-8')[:1500])",
+                "print(Path('../outputs/tables/spark_execution_plan.txt').read_text(encoding='utf-8')[:1500])\n"
+                "display(Image(filename='../outputs/figures/part3_scaling_benchmark.png'))",
             ),
         ],
         nb_dir / "03_scalable_processing_polars_spark.ipynb",
@@ -191,7 +212,8 @@ def build_notebooks():
             ),
             (
                 "code",
-                "# Live verification of leak-free causal truncation property\n"
+                "# Live verification of leak-free causal truncation property (fixed SEED = 42)\n"
+                "SEED = 42\nnp.random.seed(SEED)\n"
                 "dates = [datetime.date(2020, 3, 31), datetime.date(2020, 6, 30), datetime.date(2020, 9, 30), datetime.date(2020, 12, 31),\n"
                 "         datetime.date(2021, 3, 31), datetime.date(2021, 6, 30), datetime.date(2021, 9, 30), datetime.date(2021, 12, 31)]\n"
                 "n = len(dates)\n"
@@ -209,7 +231,9 @@ def build_notebooks():
                 "f_trunc = compute_camels_features(sample_df.slice(0, 4)).filter(pl.col('REPDTE') == datetime.date(2020, 12, 31))\n"
                 "diffs = {c: abs((f_full[c].item() or 0.0) - (f_trunc[c].item() or 0.0)) for c in ['eq_asset_ratio', 'texas_ratio', 'nclnls_ratio']}\n"
                 "print('Max abs diff at 2020-12-31 between full (2020-2021) and truncated (2020 only) panel:', diffs)\n"
-                "assert max(diffs.values()) == 0.0, 'Future leakage detected!'",
+                "assert max(diffs.values()) == 0.0, 'Future leakage detected!'\n"
+                "print('\\n=== Top 10 Leakage Parameter Shifts (DEV-only vs Naive Full-Panel Fit) ===')\n"
+                "print(pl.read_csv('../outputs/tables/leak_parameter_shift.csv').head(10))",
             ),
         ],
         nb_dir / "04_feature_pipeline.ipynb",
@@ -229,14 +253,19 @@ def build_notebooks():
                 "import json\nfrom pathlib import Path\nimport polars as pl\n\n"
                 "print('=== Walk-Forward Cross-Validation Comparison (DEV 1984-2007) ===')\n"
                 "print(pl.read_csv('../outputs/tables/cv_model_comparison.csv'))\n"
+                "print('\\n=== Per-Fold Expanding Walk-Forward Breakdown (DEV 5 Blocks) ===')\n"
+                "res = json.loads(Path('../outputs/tables/test_results.json').read_text(encoding='utf-8'))\n"
+                "for m_name in ['Texas ratio rule', 'Logistic, 3 variables', 'Logistic, 26 CAMELS', 'HistGradientBoosting, 26 CAMELS']:\n"
+                "    folds = res['cross_validation_models'][m_name]['folds']\n"
+                "    print(f'\\n-- {m_name} --')\n"
+                "    print(pl.DataFrame(folds).select(['val_years', 'rows', 'positive_rows', 'failing_banks', 'pr_auc', 'roc_auc', 'brier_score']))\n"
                 "print('\\n=== DEV Label Sensitivity (FAILURE+ASSISTANCE vs FAILURE-only) ===')\n"
-                "print(pl.read_csv('../outputs/tables/dev_label_sensitivity.csv'))\n"
-                "print('\\n=== Empirical Leakage Parameter Shift (DEV-only vs Naive Full) Top 8 ===')\n"
-                "print(pl.read_csv('../outputs/tables/leak_parameter_shift.csv').head(8))",
+                "print(pl.read_csv('../outputs/tables/dev_label_sensitivity.csv'))",
             ),
             (
                 "code",
-                "res = json.loads(Path('../outputs/tables/test_results.json').read_text(encoding='utf-8'))\n"
+                "import sys\nimport numpy as np\nfrom IPython.display import Image, display\n"
+                "sys.path.insert(0, str(Path.cwd().parent))\nfrom src.bfews.modeling import make_model\n\n"
                 "cost_cfg = res['cost_threshold_tuning']\n"
                 "t_eval = res['held_out_test_evaluation']\n"
                 "print('=== DEV Cost-Optimal Threshold & Failing Bank Counts ===')\n"
@@ -258,7 +287,18 @@ def build_notebooks():
                 "print('\\n=== Post-hoc Historical Canary Case Studies (Held-Out TEST Failures) ===')\n"
                 "print(pl.read_csv('../outputs/tables/canary_case_studies.csv'))\n"
                 "print('\\n=== Operational 2026Q2 Top-10 Watchlist (Frozen DEV Model, Unlabelled Tail) ===')\n"
-                "print(pl.read_csv('../outputs/tables/watchlist_2026q2.csv').head(10))",
+                "print(pl.read_csv('../outputs/tables/watchlist_2026q2.csv').head(10))\n"
+                "# Live check: Elkan (2001) PriorOddsCalibrator preserves rank order while restoring rare-event prior scale\n"
+                "rng = np.random.default_rng(42)\n"
+                "X_s = rng.normal(size=(400, 4)).astype(np.float32); y_s = (rng.random(400) < 0.02).astype(int)\n"
+                "pipe_s = make_model('logit').fit(X_s, y_s)\n"
+                "p_cal = pipe_s.predict_proba(X_s)[:, 1]\n"
+                "print(f'\\nPriorOddsCalibrator check (seed=42): train prior={y_s.mean():.4f}, mean calibrated p={p_cal.mean():.4f}')",
+            ),
+            (
+                "code",
+                "for fig_name in ('pr_and_cost_curves.png', 'operating_points.png', 'feature_importance.png', 'alarms_and_canary_trajectories.png'):\n"
+                "    display(Image(filename=f'../outputs/figures/{fig_name}'))",
             ),
         ],
         nb_dir / "05_modelling_and_validation.ipynb",

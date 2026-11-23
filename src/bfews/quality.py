@@ -236,7 +236,7 @@ def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
         "|---|---|---|---|",
         f"| Schema drift | {drift.height} columns | explicit cast of every column when building Bronze | stable schema, `scan_parquet` works |",
         "| Dates stored as strings | `REPDTE`, `FAILDATE`, `ESTYMD` | parse to `Date` | date arithmetic, window joins, row-group statistics |",
-        f"| Structural missing | `P3ASSET` null in {v['p3asset_null_pct']}% of rows | keep null, impute on training data only | missing is a reporting regime, not noise |",
+        f"| Structural missing | `P3ASSET` null in {v['p3asset_null_pct']}% of rows (100% pre-2001); `P9ASSET`/`NAASSET`/`ELNATR`/`NTLNLS` 18–19% in 1984–89 | drop `P3ASSET` from 26-feature model; preserve 1984–89 nulls and impute strictly in-fold | prevents post-2001 era proxy while keeping genuine reporting regimes |",
         r"| YTD flows | 7 income items (`Q1` $\rightarrow$ `Q4` step-up) | de-cumulate, only if previous row is the previous quarter | true quarterly flow; no wrong lag across a gap |",
         f"| Pre-Basel & CBLR zeros | `RBC1AAJ==0` pre-1990 ({v['pre1990_rbc1_zero_pct']}%) & `RBCRWAJ==0` in 2020-26 ({v['era2020_rbcrwa_zero_pct']}%) | recode to null when pre-1990, `EQ IS NULL`, or CBLR (`year>=2020 & RBC1AAJ>0`) | prevents labeling 37% of healthy 2020+ banks as 0% capital |",
         f"| Negative stock anomalies | `ORE<0` ({v['ore_negative']}), `SC<0` ({v['sc_negative']}) | sanitize negative stocks to null before ratios | accounting adjustment artifacts, not negative holdings |",

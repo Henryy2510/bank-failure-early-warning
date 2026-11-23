@@ -145,6 +145,7 @@ def plot_operating_points(results: dict):
         )
     ax2.set_xticks(list(x))
     ax2.set_xticklabels(labels, rotation=15, ha="right")
+    ax2.set_xlim(-0.52, len(labels) - 0.30)
     ax2.set_ylim(0, max(flagged_pct) * 1.30)
     ax2.set_ylabel("Flagged Share of All Bank-Quarters (%)")
     ax2.set_title("Supervisory Inspection Burden (% Flagged Rows)")

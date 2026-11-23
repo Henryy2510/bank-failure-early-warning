@@ -101,6 +101,14 @@ def main() -> None:
         "05/2026/TT-NHNN",
         "31/2024/TT-NHNN",
         "14/2025/TT-NHNN",
+        "Table A3.",
+        "Table A4.",
+        "Table A5.",
+        "0.6289",
+        "0.6984",
+        "0.0609",
+        "0.0634",
+        "57.2%",
     ]
 
     for row in cv_df.iter_rows(named=True):
