@@ -168,6 +168,124 @@ def audit_failures_and_exits(df: pl.DataFrame) -> dict[str, Any]:
     }
 
 
+def audit_reporting_gaps(df: pl.DataFrame) -> dict[str, Any]:
+    """Count real internal reporting gaps (non-consecutive quarters within a bank) that justify ytd_prev_ok & lag4_ok."""
+    from .core import add_time_keys
+
+    d = add_time_keys(df.select(["CERT", "REPDTE"])).with_columns(
+        pl.col("qidx").shift(1).over("CERT").alias("prev_qidx"),
+        pl.col("year").shift(1).over("CERT").alias("prev_year"),
+        pl.col("qidx").shift(4).over("CERT").alias("prev4_qidx"),
+    )
+    internal_gap = pl.col("prev_qidx").is_not_null() & ((pl.col("qidx") - pl.col("prev_qidx")) > 1)
+    intra_year_gap = (
+        internal_gap
+        & (pl.col("quarter") > 1)
+        & (pl.col("year") == pl.col("prev_year"))
+    )
+    lag4_gap = pl.col("prev4_qidx").is_not_null() & ((pl.col("qidx") - pl.col("prev4_qidx")) != 4)
+    gap_rows = d.filter(internal_gap)
+    ytd_rows = d.filter(intra_year_gap)
+    lag4_rows = d.filter(lag4_gap)
+    return {
+        "banks_with_internal_gap": int(gap_rows["CERT"].n_unique()),
+        "internal_gap_events": int(gap_rows.height),
+        "missing_bank_quarters_implied": int((gap_rows["qidx"] - gap_rows["prev_qidx"] - 1).sum()) if gap_rows.height else 0,
+        "intra_year_ytd_guard_triggers": int(ytd_rows.height),
+        "banks_with_intra_year_ytd_gap": int(ytd_rows["CERT"].n_unique()),
+        "lag4_guard_triggers": int(lag4_rows.height),
+        "banks_with_lag4_gap": int(lag4_rows["CERT"].n_unique()),
+    }
+
+
+def audit_dev_missingness_and_tails(df: pl.DataFrame) -> dict[str, Any]:
+    """Strictly DEV-only (<= 2007-12-31, pit_scorable) audit of informative missingness and extreme-tail failure rates.
+
+    Never touches TEST (2009Q1-2025Q2). Quantitatively justifies keeping outliers (winsorising instead of dropping)
+    and preserving missingness indicators rather than listwise deletion.
+    """
+    from .core import texas_expr
+    from .labels import attach_labels
+
+    dev_end = cfg()["split"]["dev_end"]
+    dev_cut = pl.lit(dev_end).str.to_date("%Y-%m-%d")
+    dev = (
+        attach_labels(df.filter(pl.col("REPDTE") <= dev_cut))
+        .filter(pl.col("pit_scorable"))
+        .with_columns(
+            pl.when(pl.col("ASSET") > 0).then(pl.col("EQ") / pl.col("ASSET")).otherwise(None).alias("eq_asset_ratio"),
+            texas_expr().alias("texas_ratio"),
+        )
+    )
+    base_rate_pct = float(dev["target_fail_4q"].mean() * 100.0)
+    n_dev = int(dev.height)
+    n_pos = int(dev["target_fail_4q"].sum())
+
+    # 1. Informative missingness across key variables (y=1 vs y=0, and fail rate when missing vs observed)
+    miss_rows = []
+    for col in ("P9ASSET", "NAASSET", "ELNATR", "NTLNLS", "EQ", "ROA", "NIMY"):
+        is_null = pl.col(col).is_null()
+        pos_df = dev.filter(pl.col("target_fail_4q") == 1)
+        neg_df = dev.filter(pl.col("target_fail_4q") == 0)
+        m_df = dev.filter(is_null)
+        o_df = dev.filter(~is_null)
+        m_rate = float(m_df["target_fail_4q"].mean() * 100.0) if m_df.height else 0.0
+        o_rate = float(o_df["target_fail_4q"].mean() * 100.0) if o_df.height else 0.0
+        miss_rows.append({
+            "column": col,
+            "missing_rows_dev": int(m_df.height),
+            "null_pct_when_y1": round(float(pos_df[col].is_null().mean() * 100.0), 2),
+            "null_pct_when_y0": round(float(neg_df[col].is_null().mean() * 100.0), 2),
+            "fail_rate_when_missing_pct": round(m_rate, 3),
+            "fail_rate_when_observed_pct": round(o_rate, 3),
+            "relative_risk_missing_vs_obs": round(m_rate / max(o_rate, 1e-6), 2),
+        })
+
+    # 2. Extreme-tail failure concentration (justifies winsorising rather than dropping outliers)
+    q01_eq = float(dev["eq_asset_ratio"].drop_nulls().quantile(0.01))
+    q01_roa = float(dev["ROA"].drop_nulls().quantile(0.01))
+    q99_roa = float(dev["ROA"].drop_nulls().quantile(0.99))
+    q99_tex = float(dev["texas_ratio"].drop_nulls().quantile(0.99))
+
+    tail_specs = [
+        ("Negative equity (EQ < 0)", pl.col("EQ") < 0),
+        (f"Bottom 1% eq_asset_ratio (< {q01_eq:.4f})", pl.col("eq_asset_ratio") < q01_eq),
+        (f"Top 1% texas_ratio (>= {q99_tex:.3f})", pl.col("texas_ratio") >= q99_tex),
+        (f"Bottom 1% ROA (< {q01_roa:.2f}%)", pl.col("ROA") < q01_roa),
+        (f"Outer 1% ROA tails (< {q01_roa:.2f}% or > {q99_roa:.2f}%)", (pl.col("ROA") < q01_roa) | (pl.col("ROA") > q99_roa)),
+        (
+            "Union of 1% distress tails (EQ<0 or bot-1% EQ/ROA or top-1% Texas)",
+            (pl.col("EQ") < 0)
+            | (pl.col("eq_asset_ratio") < q01_eq)
+            | (pl.col("ROA") < q01_roa)
+            | (pl.col("texas_ratio") >= q99_tex),
+        ),
+    ]
+    tail_rows = []
+    for label, cond in tail_specs:
+        sub = dev.filter(cond.fill_null(False))
+        sub_pos = int(sub["target_fail_4q"].sum())
+        rate = float(sub["target_fail_4q"].mean() * 100.0) if sub.height else 0.0
+        tail_rows.append({
+            "segment": label,
+            "rows": int(sub.height),
+            "share_of_dev_rows_pct": round(sub.height / max(1, n_dev) * 100.0, 2),
+            "positive_rows": sub_pos,
+            "share_of_all_dev_positives_pct": round(sub_pos / max(1, n_pos) * 100.0, 2),
+            "fail_rate_pct": round(rate, 2),
+            "lift_vs_dev_base": round(rate / max(base_rate_pct, 1e-6), 1),
+        })
+
+    return {
+        "scope": f"Strictly DEV (<= {dev_end}, pit_scorable only; TEST untouched)",
+        "dev_rows": n_dev,
+        "dev_positive_rows": n_pos,
+        "dev_base_fail_rate_pct": round(base_rate_pct, 3),
+        "informative_missingness": miss_rows,
+        "tail_failure_rates": tail_rows,
+    }
+
+
 def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
     """Run the complete audit, write the Markdown report and a JSON summary used by the final report."""
     output_path = output_path or out_dir("dq_report") / "data_quality_report.md"
@@ -179,9 +297,12 @@ def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
     zeros_era = audit_zero_as_missing_by_era(df)
     ytd_mono = audit_ytd_monotonicity(df)
     f = audit_failures_and_exits(df)
+    gaps = audit_reporting_gaps(df)
+    dev_diag = audit_dev_missingness_and_tails(df)
 
     zeros_era.write_csv(out_dir("tables") / "dq_zero_as_missing.csv")
     ytd_mono.write_csv(out_dir("tables") / "dq_ytd_monotonicity.csv")
+    save_json({"reporting_gaps": gaps, "dev_diagnostics": dev_diag}, out_dir("tables") / "dq_dev_diagnostics.json")
 
     lines = [
         "# Automated Data Quality Audit (Part 2)",
@@ -245,6 +366,12 @@ def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
         "| Merger vs failure | exit classification | merger = censored, y = 0 | healthy acquired banks are not failures |",
         f"| Publication lag | {f['share_last_report_not_scorable']}% of failures | rows that failed before availability are non-scorable | no look-ahead in training or evaluation |",
         "| Assistance vs closure | RESTYPE | both are failure events (DEV sensitivity vs FAILURE-only reported; TEST has 0 ASSISTANCE) | transparent |",
+        "",
+        "## 7. Strictly-DEV Empirical Justification (Gaps, Informative Missingness & Tails)",
+        f"- Real internal reporting gaps across 1984Q1–2026Q2: **{gaps['banks_with_internal_gap']:,}** banks ({gaps['internal_gap_events']:,} gap events; {gaps['missing_bank_quarters_implied']:,} missing bank-quarters), triggering `ytd_prev_ok` on **{gaps['intra_year_ytd_guard_triggers']:,}** intra-year rows and `lag4_ok` on **{gaps['lag4_guard_triggers']:,}** 4Q-lag rows.",
+        f"- Strictly DEV (`<= {cfg()['split']['dev_end']}`, `pit_scorable`, base failure rate **{dev_diag['dev_base_fail_rate_pct']}%**): `EQ < 0` rows exhibit **{dev_diag['tail_failure_rates'][0]['fail_rate_pct']}%** failure rate (**{dev_diag['tail_failure_rates'][0]['lift_vs_dev_base']}x** lift), proving extreme tails must be winsorised in-fold rather than dropped.",
+        "",
+        df_to_markdown(pl.DataFrame(dev_diag["tail_failure_rates"]).select(["segment", "rows", "share_of_dev_rows_pct", "share_of_all_dev_positives_pct", "fail_rate_pct", "lift_vs_dev_base"])),
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -253,6 +380,8 @@ def generate_quality_report(output_path: Path | None = None) -> dict[str, Any]:
         "manifest": m,
         "validity": v,
         "failures": f,
+        "reporting_gaps": gaps,
+        "dev_diagnostics": dev_diag,
         "schema_drift_columns": drift["column"].to_list(),
         "missingness_by_era": era.to_dicts(),
         "zero_as_missing_by_era": zeros_era.to_dicts(),

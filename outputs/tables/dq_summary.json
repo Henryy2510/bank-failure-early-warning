@@ -53,6 +53,142 @@
     "share_last_report_not_scorable": 59.1,
     "publication_lag_days": 60
   },
+  "reporting_gaps": {
+    "banks_with_internal_gap": 32,
+    "internal_gap_events": 33,
+    "missing_bank_quarters_implied": 92,
+    "intra_year_ytd_guard_triggers": 12,
+    "banks_with_intra_year_ytd_gap": 12,
+    "lag4_guard_triggers": 114,
+    "banks_with_lag4_gap": 32
+  },
+  "dev_diagnostics": {
+    "scope": "Strictly DEV (<= 2007-12-31, pit_scorable only; TEST untouched)",
+    "dev_rows": 1223542,
+    "dev_positive_rows": 8844,
+    "dev_base_fail_rate_pct": 0.723,
+    "informative_missingness": [
+      {
+        "column": "P9ASSET",
+        "missing_rows_dev": 75606,
+        "null_pct_when_y1": 33.89,
+        "null_pct_when_y0": 5.98,
+        "fail_rate_when_missing_pct": 3.964,
+        "fail_rate_when_observed_pct": 0.509,
+        "relative_risk_missing_vs_obs": 7.78
+      },
+      {
+        "column": "NAASSET",
+        "missing_rows_dev": 75605,
+        "null_pct_when_y1": 33.89,
+        "null_pct_when_y0": 5.98,
+        "fail_rate_when_missing_pct": 3.964,
+        "fail_rate_when_observed_pct": 0.509,
+        "relative_risk_missing_vs_obs": 7.78
+      },
+      {
+        "column": "ELNATR",
+        "missing_rows_dev": 41322,
+        "null_pct_when_y1": 6.51,
+        "null_pct_when_y0": 3.35,
+        "fail_rate_when_missing_pct": 1.394,
+        "fail_rate_when_observed_pct": 0.699,
+        "relative_risk_missing_vs_obs": 1.99
+      },
+      {
+        "column": "NTLNLS",
+        "missing_rows_dev": 76540,
+        "null_pct_when_y1": 33.8,
+        "null_pct_when_y0": 6.06,
+        "fail_rate_when_missing_pct": 3.905,
+        "fail_rate_when_observed_pct": 0.51,
+        "relative_risk_missing_vs_obs": 7.65
+      },
+      {
+        "column": "EQ",
+        "missing_rows_dev": 2892,
+        "null_pct_when_y1": 0.0,
+        "null_pct_when_y0": 0.24,
+        "fail_rate_when_missing_pct": 0.0,
+        "fail_rate_when_observed_pct": 0.725,
+        "relative_risk_missing_vs_obs": 0.0
+      },
+      {
+        "column": "ROA",
+        "missing_rows_dev": 0,
+        "null_pct_when_y1": 0.0,
+        "null_pct_when_y0": 0.0,
+        "fail_rate_when_missing_pct": 0.0,
+        "fail_rate_when_observed_pct": 0.723,
+        "relative_risk_missing_vs_obs": 0.0
+      },
+      {
+        "column": "NIMY",
+        "missing_rows_dev": 0,
+        "null_pct_when_y1": 0.0,
+        "null_pct_when_y0": 0.0,
+        "fail_rate_when_missing_pct": 0.0,
+        "fail_rate_when_observed_pct": 0.723,
+        "relative_risk_missing_vs_obs": 0.0
+      }
+    ],
+    "tail_failure_rates": [
+      {
+        "segment": "Negative equity (EQ < 0)",
+        "rows": 13215,
+        "share_of_dev_rows_pct": 1.08,
+        "positive_rows": 3454,
+        "share_of_all_dev_positives_pct": 39.05,
+        "fail_rate_pct": 26.14,
+        "lift_vs_dev_base": 36.2
+      },
+      {
+        "segment": "Bottom 1% eq_asset_ratio (< -0.0035)",
+        "rows": 12206,
+        "share_of_dev_rows_pct": 1.0,
+        "positive_rows": 3260,
+        "share_of_all_dev_positives_pct": 36.86,
+        "fail_rate_pct": 26.71,
+        "lift_vs_dev_base": 36.9
+      },
+      {
+        "segment": "Top 1% texas_ratio (>= 10.000)",
+        "rows": 15611,
+        "share_of_dev_rows_pct": 1.28,
+        "positive_rows": 3039,
+        "share_of_all_dev_positives_pct": 34.36,
+        "fail_rate_pct": 19.47,
+        "lift_vs_dev_base": 26.9
+      },
+      {
+        "segment": "Bottom 1% ROA (< -5.75%)",
+        "rows": 12235,
+        "share_of_dev_rows_pct": 1.0,
+        "positive_rows": 2239,
+        "share_of_all_dev_positives_pct": 25.32,
+        "fail_rate_pct": 18.3,
+        "lift_vs_dev_base": 25.3
+      },
+      {
+        "segment": "Outer 1% ROA tails (< -5.75% or > 3.71%)",
+        "rows": 24470,
+        "share_of_dev_rows_pct": 2.0,
+        "positive_rows": 2267,
+        "share_of_all_dev_positives_pct": 25.63,
+        "fail_rate_pct": 9.26,
+        "lift_vs_dev_base": 12.8
+      },
+      {
+        "segment": "Union of 1% distress tails (EQ<0 or bot-1% EQ/ROA or top-1% Texas)",
+        "rows": 25795,
+        "share_of_dev_rows_pct": 2.11,
+        "positive_rows": 4345,
+        "share_of_all_dev_positives_pct": 49.13,
+        "fail_rate_pct": 16.84,
+        "lift_vs_dev_base": 23.3
+      }
+    ]
+  },
   "schema_drift_columns": [
     "CHBAL",
     "DEP",

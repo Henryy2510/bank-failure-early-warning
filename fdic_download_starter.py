@@ -132,7 +132,7 @@ def download_financials(out: Path, quarters: list[str]) -> None:
     fin_dir = out / "financials"
     fin_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = out / "manifest_financials.json"
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
 
     for i, q in enumerate(quarters, 1):
         target = fin_dir / f"REPDTE={q}.parquet"
@@ -169,7 +169,7 @@ def download_small_tables(out: Path) -> None:
 # Completeness check
 # ----------------------------------------------------------------------------
 def check(out: Path) -> bool:
-    manifest = json.loads((out / "manifest_financials.json").read_text())
+    manifest = json.loads((out / "manifest_financials.json").read_text(encoding="utf-8"))
     panel = pd.read_parquet(out / "financials", columns=["CERT", "REPDTE"])
     n_dup = int(panel.duplicated(["CERT", "REPDTE"]).sum())
     bad = [q for q, m in manifest.items() if not m["complete"]]

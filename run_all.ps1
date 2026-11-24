@@ -38,7 +38,21 @@ function Invoke-Step {
     Write-Host ""
     Write-Host $Label
     $t0 = Get-Date
-    & $Python @ArgsList
+    $previousErrorActionPreference = $ErrorActionPreference
+    $hasNativePref = Test-Path Variable:PSNativeCommandUseErrorActionPreference
+    if ($hasNativePref) {
+        $previousNativePref = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+    }
+    try {
+        $ErrorActionPreference = "Continue"
+        & $Python @ArgsList
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        if ($hasNativePref) {
+            $PSNativeCommandUseErrorActionPreference = $previousNativePref
+        }
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "Step failed with exit code ${LASTEXITCODE}: $Label"
     }

@@ -246,11 +246,11 @@ def test_pdf_page_limit():
     assert pdf_path.exists() and pdf_path.stat().st_size > 10_000, "Run 08_build_notebooks_and_report.py first"
     if not (shutil.which("pdfinfo") and shutil.which("pdftotext")):
         pytest.skip("poppler-utils (pdfinfo/pdftotext) not installed on PATH; PDF file presence verified")
-    out = subprocess.run(["pdfinfo", str(pdf_path)], check=True, capture_output=True, text=True).stdout
+    out = subprocess.run(["pdfinfo", str(pdf_path)], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     m = re.search(r"Pages:\s+(\d+)", out)
     assert m is not None
     pages = int(m.group(1))
-    pdf_txt = subprocess.run(["pdftotext", str(pdf_path), "-"], check=True, capture_output=True, text=True).stdout
+    pdf_txt = subprocess.run(["pdftotext", str(pdf_path), "-"], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     pdf_pages = [p for p in pdf_txt.split("\f") if p.strip()]
     app_page = next((idx + 1 for idx, ptxt in enumerate(pdf_pages) if "Appendix:" in ptxt), None)
     main_pages = (app_page - 1) if app_page is not None else pages
@@ -474,6 +474,91 @@ def test_cfp_interval_contains_baseline():
     for idx, c_val in enumerate(c_vals):
         pred_musd = np.round((m_hat + c_val * e_hat) / 1000.0, 1)
         assert np.max(np.abs(pred_musd - y_kusd[idx] / 1000.0)) <= 1e-6
+
+
+def test_full_panel_truncation_2015q4_all_26_features():
+    """Verify exact 0.0 causal invariance across ALL 26 CAMELS features + 7 flows on real FDIC Bronze truncated at 2015Q4."""
+    from src.bfews.features import FEATURE_COLS_CAMELS
+    from src.bfews.io import FLOWS_YTD, bronze_financials_path
+
+    bronze_p = bronze_financials_path()
+    if not bronze_p.exists() or not any(bronze_p.glob("YEAR=*/*.parquet")):
+        pytest.skip("Bronze parquet not present locally")
+
+    cutoff = datetime.date(2015, 12, 31)
+    bronze = pl.read_parquet(bronze_p, hive_partitioning=True)
+    full_sub = (
+        compute_camels_features(decumulate_ytd_flows(bronze).drop(["year", "quarter", "qidx"]))
+        .filter(pl.col("REPDTE") <= cutoff)
+        .sort(["CERT", "REPDTE"])
+    )
+    trunc_df = (
+        compute_camels_features(
+            decumulate_ytd_flows(bronze.filter(pl.col("REPDTE") <= cutoff)).drop(["year", "quarter", "qidx"])
+        )
+        .sort(["CERT", "REPDTE"])
+    )
+
+    assert full_sub.height == trunc_df.height and trunc_df.height > 1_000_000
+    assert (full_sub["CERT"] == trunc_df["CERT"]).all()
+    assert (full_sub["REPDTE"] == trunc_df["REPDTE"]).all()
+    for col in list(FEATURE_COLS_CAMELS) + [f"{c}_Q" for c in FLOWS_YTD]:
+        a, b = full_sub[col], trunc_df[col]
+        assert int((a.is_null() != b.is_null()).sum()) == 0, f"Null mismatch on {col}"
+        both = a.is_not_null() & b.is_not_null()
+        if int(both.sum()) > 0:
+            max_d = float((a.filter(both) - b.filter(both)).abs().max())
+            assert max_d == 0.0, f"Future look-ahead detected on {col}: max_abs_diff={max_d}"
+
+
+def test_deep_audit_artifacts_valid():
+    """Verify DEV diagnostics, 100% 1.68M Spark parity, engine/shuffle ablations, truncation audit, and posthoc TEST diagnostics."""
+    import json
+    from src.bfews.utils import out_dir
+
+    tdir = out_dir("tables")
+    dq_file = tdir / "dq_summary.json"
+    is_frozen = True
+    total_manifest_rows = 1_682_616
+    if dq_file.exists():
+        dq = json.loads(dq_file.read_text(encoding="utf-8"))
+        total_manifest_rows = int(dq["manifest"]["total_manifest_rows"])
+        is_frozen = total_manifest_rows == 1_682_616
+
+    dq_dev = json.loads((tdir / "dq_dev_diagnostics.json").read_text(encoding="utf-8"))
+    assert dq_dev["reporting_gaps"]["banks_with_internal_gap"] > 0
+    assert dq_dev["dev_diagnostics"]["tail_failure_rates"][0]["lift_vs_dev_base"] > 10.0
+
+    sp_full = json.loads((tdir / "spark_full_panel_parity.json").read_text(encoding="utf-8"))
+    if is_frozen:
+        assert sp_full["rows_compared"] == 1_682_616
+    else:
+        assert sp_full["rows_compared"] == total_manifest_rows and sp_full["rows_compared"] > 1_500_000
+    assert sp_full["keys_exact_match"] is True
+    assert sp_full["total_null_mismatches"] == 0
+    assert sp_full["max_abs_diff_any_column"] < 1e-6
+
+    abl = json.loads((tdir / "part3_engine_ablation.json").read_text(encoding="utf-8"))
+    assert len(abl["thread_scaling_1x"]) == 6
+    assert abl["optimizer_ablation_year_ge_2008"]["runtime_speedup_x"] > 1.0
+
+    shuf = json.loads((tdir / "spark_shuffle_ablation.json").read_text(encoding="utf-8"))
+    expected_rows = 1_682_616 if is_frozen else total_manifest_rows
+    assert shuf["shuffle_8"]["rows"] == expected_rows and shuf["shuffle_200_default"]["rows"] == expected_rows
+
+    trunc = json.loads((tdir / "full_panel_truncation_audit.json").read_text(encoding="utf-8"))
+    assert trunc["exact_causal_invariance"] is True
+    assert trunc["total_columns_verified"] == 33
+
+    ph = json.loads((tdir / "test_posthoc_diagnostics.json").read_text(encoding="utf-8"))
+    assert ph["verified_parity_with_test_results_json"] is True
+    lt = ph["lead_time_distribution"]["theta_star"]
+    if is_frozen:
+        assert lt["caught_banks"] == 469 and lt["total_failing_banks"] == 485
+    else:
+        assert 0 < lt["caught_banks"] <= lt["total_failing_banks"]
+    assert lt["lead_1q_le90d"] + lt["lead_2q_91_180d"] + lt["lead_3q_181_270d"] + lt["lead_4q_gt270d"] == lt["caught_banks"]
+    assert ph["annual_summary"]["hgb_mean_annual_ap"] > ph["annual_summary"]["texas_mean_annual_ap"]
 
 
 

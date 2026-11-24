@@ -91,7 +91,11 @@ def _jvm_prop(key: str, val: str) -> str:
     return f'"-D{key}={val}"' if " " in val else f"-D{key}={val}"
 
 
-def get_spark_session(app_name: str = "BFT65B-BankFailurePipeline", master: str | None = None):
+def get_spark_session(
+    app_name: str = "BFT65B-BankFailurePipeline",
+    master: str | None = None,
+    shuffle_partitions: int | None = None,
+):
     """Local SparkSession with a conservative memory configuration for a laptop."""
     import re
     import sys
@@ -108,11 +112,12 @@ def get_spark_session(app_name: str = "BFT65B-BankFailurePipeline", master: str 
     java_opts = " ".join(jvm_parts)
     s = cfg()["spark"]
     m = master or s["master"]
+    shuf = int(s["shuffle_partitions"] if shuffle_partitions is None else shuffle_partitions)
     match = re.fullmatch(r"local\[(\d+)\]", m.strip())
     default_par = match.group(1) if match else "4"
     return (SparkSession.builder.appName(app_name).master(m)
             .config("spark.driver.memory", s["driver_memory"])
-            .config("spark.sql.shuffle.partitions", str(s["shuffle_partitions"]))
+            .config("spark.sql.shuffle.partitions", str(shuf))
             .config("spark.default.parallelism", default_par)
             .config("spark.sql.adaptive.enabled", "true")
             .config("spark.ui.enabled", "false")

@@ -1122,3 +1122,189 @@ def write_frozen_protocol(results: dict[str, Any] | None = None) -> Path:
     out_p = tdir / "frozen_protocol.json"
     save_json(manifest, out_p)
     return out_p
+
+
+def compute_posthoc_test_diagnostics(gold_path: Path | None = None) -> dict[str, Any]:
+    """Passive post-hoc lead-time distribution (1Q-4Q), 2009-2012 vs 2013-2025Q2 split, and Mean Annual AP.
+
+    Replays the exact frozen DEV-trained champion (SEED=42) and verifies bit-exact agreement with
+    `outputs/tables/test_results.json` without modifying `test_results.json` or `frozen_protocol.json`.
+    """
+    import json
+
+    tdir = out_dir("tables")
+    saved = json.loads((tdir / "test_results.json").read_text(encoding="utf-8"))
+    cfp_stab = json.loads((tdir / "cfp_stability_interval.json").read_text(encoding="utf-8"))
+    theta_exact = float(cfp_stab["theta_star_grid"])
+
+    df = load_modeling_frame(gold_path)
+    dev = df.filter(pl.col("split_group") == "DEV").sort("REPDTE")
+    test = df.filter(pl.col("split_group") == "TEST").sort("REPDTE")
+    del df
+    gc.collect()
+
+    feats = FEATURE_COLS_CAMELS
+    X_dev, y_dev = dev.select(feats).to_numpy(), dev["target_fail_4q"].to_numpy()
+    champion = make_model("hgb").fit(X_dev, y_dev)
+    p_test = champion.predict_proba(test.select(feats).to_numpy())[:, 1]
+    y_test = test["target_fail_4q"].to_numpy()
+    p_texas = (
+        make_model("texas")
+        .fit(dev.select(["texas_ratio"]).to_numpy(), y_dev)
+        .predict_proba(test.select(["texas_ratio"]).to_numpy())[:, 1]
+    )
+
+    # Verify exact parity with frozen test_results.json
+    check_m = evaluate_predictions(y_test, p_test)
+    ref_m = saved["held_out_test_evaluation"]
+    assert check_m["pr_auc"] == ref_m["pr_auc"], f"PR-AUC drift: {check_m['pr_auc']} vs {ref_m['pr_auc']}"
+    assert check_m["roc_auc"] == ref_m["roc_auc"], f"ROC-AUC drift: {check_m['roc_auc']} vs {ref_m['roc_auc']}"
+    assert check_m["brier_score"] == ref_m["brier_score"], f"Brier drift: {check_m['brier_score']} vs {ref_m['brier_score']}"
+
+    # 1. Lead-time distribution (1Q / 2Q / 3Q / 4Q before failure) at theta* and Top 1% / Top 2%
+    ranked = (
+        test.select("REPDTE")
+        .with_columns(pl.Series("p", p_test), pl.arange(0, test.height).alias("idx"))
+        .with_columns(
+            pl.col("p").rank(method="ordinal", descending=True).over("REPDTE").alias("rk"),
+            pl.len().over("REPDTE").alias("n_q"),
+        )
+        .sort("idx")
+    )
+    rk = ranked["rk"].to_numpy()
+    nq = ranked["n_q"].to_numpy()
+    rules = {
+        "theta_star": p_test >= theta_exact,
+        "top_1pct_per_qtr": rk <= np.maximum(1, np.round(nq * 0.01).astype(int)),
+        "top_2pct_per_qtr": rk <= np.maximum(1, np.round(nq * 0.02).astype(int)),
+    }
+    lead_dist = {}
+    for rname, flag in rules.items():
+        d = test.select("CERT", "REPDTE", "FAILDATE", "target_fail_4q").with_columns(
+            pl.Series("flag", flag.astype(bool))
+        )
+        pos = d.filter(pl.col("target_fail_4q") == 1)
+        per_bank = pos.group_by("CERT").agg(
+            pl.col("FAILDATE").first(),
+            pl.col("flag").any().alias("caught"),
+            pl.col("REPDTE").filter(pl.col("flag")).min().alias("first_alarm"),
+            pl.col("flag").sum().cast(int).alias("flagged_pos_quarters"),
+        )
+        caught = per_bank.filter(pl.col("caught")).with_columns(
+            (pl.col("FAILDATE") - pl.col("first_alarm")).dt.total_days().alias("lead_days")
+        )
+        ld = caught["lead_days"].to_numpy()
+        n_total = int(per_bank.height)
+        n_caught = int(caught.height)
+        n_missed = n_total - n_caught
+        # Quarter buckets: 1Q (<=90d), 2Q (91-180d), 3Q (181-270d), 4Q (>270d)
+        b1 = int(np.sum(ld <= 90))
+        b2 = int(np.sum((ld > 90) & (ld <= 180)))
+        b3 = int(np.sum((ld > 180) & (ld <= 270)))
+        b4 = int(np.sum(ld > 270))
+        lead_dist[rname] = {
+            "total_failing_banks": n_total,
+            "caught_banks": n_caught,
+            "missed_banks": n_missed,
+            "lead_1q_le90d": b1,
+            "lead_2q_91_180d": b2,
+            "lead_3q_181_270d": b3,
+            "lead_4q_gt270d": b4,
+            "share_ge_2q_of_caught_pct": round(float((b2 + b3 + b4) / max(1, n_caught) * 100.0), 2),
+            "share_ge_3q_of_caught_pct": round(float((b3 + b4) / max(1, n_caught) * 100.0), 2),
+            "mean_lead_days": round(float(np.mean(ld)), 1) if len(ld) else None,
+            "median_lead_days": round(float(np.median(ld)), 1) if len(ld) else None,
+            "q25_lead_days": round(float(np.quantile(ld, 0.25)), 1) if len(ld) else None,
+            "q75_lead_days": round(float(np.quantile(ld, 0.75)), 1) if len(ld) else None,
+            "mean_flagged_quarters_per_caught_bank": round(float(caught["flagged_pos_quarters"].mean()), 2) if n_caught else None,
+        }
+
+    # 2. Alternative subperiod breakdown (Acute 2009-2012 vs Post-Acute 2013-2025Q2)
+    years = test["REPDTE"].dt.year().to_numpy()
+    subperiods = {}
+    for label, mask in (
+        ("acute_2009_2012", years <= 2012),
+        ("post_acute_2013_2025q2", years >= 2013),
+        ("gfc_2009_2014", years <= 2014),
+        ("modern_2015_2025q2", years >= 2015),
+    ):
+        fb = int(test.filter(pl.Series(mask) & (pl.col("target_fail_4q") == 1))["CERT"].n_unique())
+        subperiods[label] = {
+            "failing_banks": fb,
+            "hgb": evaluate_predictions(y_test[mask], p_test[mask]),
+            "texas_rule": evaluate_predictions(y_test[mask], p_texas[mask]),
+        }
+
+    # 3. Annual AP (PR-AUC) and Mean Annual AP across all active failure years in 2009..2025
+    annual = []
+    for yr in sorted(int(x) for x in np.unique(years)):
+        m = years == yr
+        n_pos_y = int(y_test[m].sum())
+        n_rows_y = int(m.sum())
+        n_banks_y = int(test.filter((pl.col("REPDTE").dt.year() == yr) & (pl.col("target_fail_4q") == 1))["CERT"].n_unique())
+        if n_pos_y == 0:
+            annual.append({
+                "year": yr,
+                "rows": n_rows_y,
+                "positive_rows": 0,
+                "failing_banks": 0,
+                "hgb_ap": None,
+                "hgb_roc_auc": None,
+                "texas_ap": None,
+                "texas_roc_auc": None,
+            })
+            continue
+        hm = evaluate_predictions(y_test[m], p_test[m])
+        tm = evaluate_predictions(y_test[m], p_texas[m])
+        annual.append({
+            "year": yr,
+            "rows": n_rows_y,
+            "positive_rows": n_pos_y,
+            "failing_banks": n_banks_y,
+            "hgb_ap": hm["pr_auc"],
+            "hgb_roc_auc": hm["roc_auc"],
+            "texas_ap": tm["pr_auc"],
+            "texas_roc_auc": tm["roc_auc"],
+        })
+
+    active = [a for a in annual if a["hgb_ap"] is not None]
+    w_pos = np.array([a["positive_rows"] for a in active], dtype=float)
+    hgb_aps = np.array([a["hgb_ap"] for a in active], dtype=float)
+    tex_aps = np.array([a["texas_ap"] for a in active], dtype=float)
+    hgb_rocs = np.array([a["hgb_roc_auc"] for a in active], dtype=float)
+    tex_rocs = np.array([a["texas_roc_auc"] for a in active], dtype=float)
+
+    active_post = [a for a in active if a["year"] >= 2013]
+    hgb_aps_post = np.array([a["hgb_ap"] for a in active_post], dtype=float)
+    tex_aps_post = np.array([a["texas_ap"] for a in active_post], dtype=float)
+
+    payload = {
+        "policy": "Passive post-hoc diagnostic breakdown on exact frozen DEV-trained champion predictions (test_results.json SHA-256 unchanged).",
+        "verified_parity_with_test_results_json": True,
+        "theta_star_exact": theta_exact,
+        "lead_time_distribution": lead_dist,
+        "subperiod_breakdown": subperiods,
+        "annual_summary": {
+            "total_test_years": len(annual),
+            "years_with_failures": len(active),
+            "zero_failure_years": [a["year"] for a in annual if a["hgb_ap"] is None],
+            "hgb_mean_annual_ap": round(float(np.mean(hgb_aps)), 4),
+            "hgb_median_annual_ap": round(float(np.median(hgb_aps)), 4),
+            "hgb_pos_weighted_annual_ap": round(float(np.sum(hgb_aps * w_pos) / np.sum(w_pos)), 4),
+            "hgb_mean_annual_roc_auc": round(float(np.mean(hgb_rocs)), 4),
+            "texas_mean_annual_ap": round(float(np.mean(tex_aps)), 4),
+            "texas_mean_annual_roc_auc": round(float(np.mean(tex_rocs)), 4),
+            "post_2013_years_with_failures": len(active_post),
+            "post_2013_hgb_mean_annual_ap": round(float(np.mean(hgb_aps_post)), 4),
+            "post_2013_texas_mean_annual_ap": round(float(np.mean(tex_aps_post)), 4),
+            "hgb_wins_ap_years": int(np.sum(hgb_aps > tex_aps)),
+        },
+        "annual_by_year": annual,
+    }
+    save_json(payload, tdir / "test_posthoc_diagnostics.json")
+    log.info(
+        f"Saved passive post-hoc TEST diagnostics: Mean Annual AP={payload['annual_summary']['hgb_mean_annual_ap']} "
+        f"(Texas={payload['annual_summary']['texas_mean_annual_ap']}), "
+        f"lead>=3Q at theta*={lead_dist['theta_star']['share_ge_3q_of_caught_pct']}%"
+    )
+    return payload

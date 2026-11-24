@@ -1,0 +1,41 @@
+{
+  "scope": "100% full panel (all 170 quarters, 1984Q1-2026Q2)",
+  "rows_compared": 1682616,
+  "banks_compared": 24064,
+  "keys_exact_match": true,
+  "total_null_mismatches": 0,
+  "max_abs_diff_any_column": 0.0,
+  "max_rel_diff_any_column": 0.0,
+  "per_column": {
+    "NETINC_Q": {
+      "non_null_compared": 1672646,
+      "null_mismatches": 0,
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0
+    },
+    "eq_asset_ratio": {
+      "non_null_compared": 1678468,
+      "null_mismatches": 0,
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0
+    },
+    "texas_ratio": {
+      "non_null_compared": 1682616,
+      "null_mismatches": 0,
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0
+    },
+    "asset_growth_4q": {
+      "non_null_compared": 1587685,
+      "null_mismatches": 0,
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0
+    },
+    "d4_texas_ratio": {
+      "non_null_compared": 1587685,
+      "null_mismatches": 0,
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0
+    }
+  }
+}

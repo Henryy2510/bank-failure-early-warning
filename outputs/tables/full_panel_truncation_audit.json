@@ -1,0 +1,12 @@
+{
+  "cutoff_date": "2015-12-31",
+  "full_bronze_rows": 1682616,
+  "truncated_rows_compared": 1467807,
+  "future_rows_removed": 214809,
+  "features_checked": 26,
+  "ytd_flows_checked": 7,
+  "total_columns_verified": 33,
+  "null_mask_mismatches": 0,
+  "max_abs_diff_any_column": 0.0,
+  "exact_causal_invariance": true
+}

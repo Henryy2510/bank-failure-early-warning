@@ -73,12 +73,12 @@ def compare_rows(spark_rows: list[dict], polars_sample: pl.DataFrame) -> dict:
             "max_abs_diff_any_column": worst}
 
 
-def _run_spark_worker(src_p: Path, master: str = "local[2]") -> None:
+def _run_spark_worker(src_p: Path, master: str = "local[2]", shuffle_partitions: int = 8) -> None:
     """Fresh-JVM worker computing total rows and checksum summary via Spark core transformations."""
     from pyspark.sql import functions as F
 
     t0 = time.perf_counter()
-    spark = get_spark_session("BFT65B-ScaleWorker", master=master)
+    spark = get_spark_session("BFT65B-ScaleWorker", master=master, shuffle_partitions=shuffle_partitions)
     t_startup = time.perf_counter() - t0
     t1 = time.perf_counter()
     df = spark_core(spark, src_p)
@@ -96,7 +96,9 @@ def _run_spark_worker(src_p: Path, master: str = "local[2]") -> None:
     }))
 
 
-def measure_spark_subprocess(src_p: Path, scale: int, master: str = "local[2]", repeat: int = 3) -> dict:
+def measure_spark_subprocess(
+    src_p: Path, scale: int, master: str = "local[2]", repeat: int = 3, shuffle_partitions: int = 8
+) -> dict:
     """Measure fresh Python+JVM Spark execution while polling process-tree RSS (including child Java JVM)."""
     import re
 
@@ -105,10 +107,20 @@ def measure_spark_subprocess(src_p: Path, scale: int, master: str = "local[2]", 
     runs = []
     for _ in range(repeat):
         proc = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "--spark-worker", str(src_p), "--master", master],
+            [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "--spark-worker",
+                str(src_p),
+                "--master",
+                master,
+                "--shuffle-partitions",
+                str(shuffle_partitions),
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
         )
         p_util = psutil.Process(proc.pid)
         peak_bytes = 0
@@ -138,6 +150,7 @@ def measure_spark_subprocess(src_p: Path, scale: int, master: str = "local[2]", 
         "rows": med["rows"],
         "engine": f"PySpark {master}",
         "threads": threads,
+        "shuffle_partitions": shuffle_partitions,
         "spark_startup_s": med["spark_startup_s"],
         "compute_s": med["compute_s"],
         "total_s": med["total_s"],
@@ -145,16 +158,114 @@ def measure_spark_subprocess(src_p: Path, scale: int, master: str = "local[2]", 
     }
 
 
+def run_full_panel_spark_parity(bronze_p: Path) -> dict:
+    """Verify 100% row-level numerical parity across ALL 1,682,616 rows & 5 columns between PySpark and Polars."""
+    tmp_dir = Path(tempfile.mkdtemp(prefix="bfews_spark_full_parity_"))
+    try:
+        spark = get_spark_session("BFT65B-FullParity", master="local[4]", shuffle_partitions=8)
+        sdf = spark_core(spark, bronze_p).select("CERT", "REPDTE", *SPARK_OUT)
+        sdf.write.mode("overwrite").parquet(str(tmp_dir))
+        spark.stop()
+
+        sp_df = (
+            pl.read_parquet(sorted(tmp_dir.glob("*.parquet")))
+            .with_columns(pl.col("CERT").cast(pl.Int32))
+            .sort(["CERT", "REPDTE"])
+        )
+        pl_df = (
+            core_polars(pl.scan_parquet(bronze_p, hive_partitioning=True).select(CORE_COLS))
+            .select(["CERT", "REPDTE"] + SPARK_OUT)
+            .collect(engine="streaming")
+            .with_columns(pl.col("CERT").cast(pl.Int32))
+            .sort(["CERT", "REPDTE"])
+        )
+
+        keys_match = (
+            sp_df.height == pl_df.height
+            and bool((sp_df["CERT"] == pl_df["CERT"]).all())
+            and bool((sp_df["REPDTE"] == pl_df["REPDTE"]).all())
+        )
+        per_col = {}
+        worst_abs = 0.0
+        worst_rel = 0.0
+        total_null_mismatch = 0
+        for c in SPARK_OUT:
+            a = sp_df[c].cast(pl.Float64)
+            b = pl_df[c].cast(pl.Float64)
+            nm = int((a.is_null() != b.is_null()).sum())
+            total_null_mismatch += nm
+            both = a.is_not_null() & b.is_not_null()
+            av = a.filter(both)
+            bv = b.filter(both)
+            abs_d = float((av - bv).abs().max()) if av.len() else 0.0
+            rel_d = float(((av - bv).abs() / bv.abs().clip(lower_bound=1.0)).max()) if av.len() else 0.0
+            worst_abs = max(worst_abs, abs_d)
+            worst_rel = max(worst_rel, rel_d)
+            per_col[c] = {
+                "non_null_compared": int(av.len()),
+                "null_mismatches": nm,
+                "max_abs_diff": abs_d,
+                "max_rel_diff": rel_d,
+            }
+
+        payload = {
+            "scope": "100% full panel (all 170 quarters, 1984Q1-2026Q2)",
+            "rows_compared": int(pl_df.height),
+            "banks_compared": int(pl_df["CERT"].n_unique()),
+            "keys_exact_match": keys_match,
+            "total_null_mismatches": total_null_mismatch,
+            "max_abs_diff_any_column": worst_abs,
+            "max_rel_diff_any_column": worst_rel,
+            "per_column": per_col,
+        }
+        save_json(payload, out_dir("tables") / "spark_full_panel_parity.json")
+        log.info(
+            f"100% Full-Panel Spark-Polars parity: {payload['rows_compared']:,} rows, "
+            f"keys_match={keys_match}, null_mismatch={total_null_mismatch}, max_abs_diff={worst_abs:.3e}"
+        )
+        return payload
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def run_spark_shuffle_ablation(bronze_p: Path) -> dict:
+    """Compare PySpark local[4] (1x) with tuned shuffle.partitions=8 vs Spark default 200."""
+    r8 = measure_spark_subprocess(bronze_p, 1, master="local[4]", repeat=2, shuffle_partitions=8)
+    r200 = measure_spark_subprocess(bronze_p, 1, master="local[4]", repeat=2, shuffle_partitions=200)
+    payload = {
+        "master": "local[4]",
+        "scale": "1x",
+        "repeat": 2,
+        "shuffle_8": r8,
+        "shuffle_200_default": r200,
+        "compute_speedup_8_vs_200": round(r200["compute_s"] / max(r8["compute_s"], 1e-6), 2),
+        "total_speedup_8_vs_200": round(r200["total_s"] / max(r8["total_s"], 1e-6), 2),
+    }
+    save_json(payload, out_dir("tables") / "spark_shuffle_ablation.json")
+    log.info(f"Spark shuffle ablation (8 vs 200): {payload}")
+    return payload
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--spark-worker", type=Path, default=None, help=argparse.SUPPRESS)
     ap.add_argument("--master", type=str, default="local[2]", help=argparse.SUPPRESS)
+    ap.add_argument("--shuffle-partitions", type=int, default=8, help=argparse.SUPPRESS)
+    ap.add_argument(
+        "--ablation-and-full-parity-only",
+        action="store_true",
+        help="Run only 100% 1.68M-row Spark-Polars parity and shuffle.partitions 8 vs 200 ablation.",
+    )
     args = ap.parse_args()
     if args.spark_worker is not None:
-        _run_spark_worker(args.spark_worker, master=args.master)
+        _run_spark_worker(args.spark_worker, master=args.master, shuffle_partitions=args.shuffle_partitions)
         return
 
     bronze_p = bronze_financials_path()
+    if args.ablation_and_full_parity_only:
+        run_full_panel_spark_parity(bronze_p)
+        run_spark_shuffle_ablation(bronze_p)
+        return
     log.info("Polars reference (same steps)...")
     pl_yearly, pl_sample, t_polars = polars_reference(bronze_p)
     log.info(f"Polars lazy collect + aggregate: {t_polars:.2f}s")
@@ -207,6 +318,10 @@ def main() -> None:
     p3_csv = out_dir("tables") / "part3_benchmark_results.csv"
     if p3_csv.exists():
         bench_mod.plot(pl.read_csv(p3_csv), spark_df)
+
+    log.info("100% full-panel Spark-Polars row-level parity & shuffle.partitions 8 vs 200 ablation...")
+    run_full_panel_spark_parity(bronze_p)
+    run_spark_shuffle_ablation(bronze_p)
 
     log.info("MLlib demo (development-only split)...")
     save_json(run_spark_mllib_demo(), out_dir("tables") / "spark_mllib_results.json")

@@ -90,6 +90,9 @@ def main() -> None:
         "Table A3.",
         "Table A4.",
         "Table A5.",
+        "Table A6.",
+        "Table A7.",
+        "Table A8.",
         "CERT 33802",
         "$585.8k",
         "16.1%",
@@ -104,6 +107,15 @@ def main() -> None:
         "0.0609",
         "0.0634",
         "57.2%",
+        "1,467,807",
+        "4.24x",
+        "4.84x",
+        "26.14%",
+        "36.2x",
+        "0.3733",
+        "16 / 16",
+        "85.50%",
+        "https://github.com/Henryy2510/bank-failure-early-warning",
         *repo_handles,
     ]
 
@@ -128,16 +140,20 @@ def main() -> None:
         f"${cfp_stab['cfp_lo_kusd']:.1f}\\text{{k}}",
         f"${cfp_stab['cfp_hi_kusd']:.1f}\\text{{k}}",
     ]
+
     for row in cv_df.iter_rows(named=True):
         snapshot_exact_in_report.append(f"{row['pr_auc']:.4f}")
         snapshot_exact_in_report.append(f"{row['roc_auc']:.4f}")
         snapshot_exact_in_report.append(f"{row['brier_score']:.5f}")
+
     for row in exit_df.iter_rows(named=True):
         snapshot_exact_in_report.append(f"{int(row['banks']):,}")
+
     for row in feat_imp_df.head(3).iter_rows(named=True):
         always_required_in_report.append(row["feature"])
         snapshot_exact_in_report.append(f"{row['hgb_perm_pr_auc']:.5f}")
         snapshot_exact_in_report.append(f"{row['logit_std_coef']:+.4f}")
+
     for row in canary_df.iter_rows(named=True):
         if row["lead_days_theta"] is not None:
             snapshot_exact_in_report.append(f"{int(row['lead_days_theta'])} d")
@@ -226,12 +242,12 @@ def main() -> None:
 
     has_poppler = all(shutil.which(cmd) for cmd in ("pdfinfo", "pdftotext", "pdffonts"))
     if has_poppler:
-        info = subprocess.run(["pdfinfo", str(pdf_path)], check=True, capture_output=True, text=True).stdout
+        info = subprocess.run(["pdfinfo", str(pdf_path)], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
         m = re.search(r"Pages:\s+(\d+)", info)
         if not m:
             raise AssertionError("Could not parse page count from pdfinfo output")
         pages = int(m.group(1))
-        pdf_txt = subprocess.run(["pdftotext", str(pdf_path), "-"], check=True, capture_output=True, text=True).stdout
+        pdf_txt = subprocess.run(["pdftotext", str(pdf_path), "-"], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
         pdf_pages = [p for p in pdf_txt.split("\f") if p.strip()]
         app_page = next((idx + 1 for idx, ptxt in enumerate(pdf_pages) if "Appendix:" in ptxt), None)
         main_pages = (app_page - 1) if app_page is not None else pages
@@ -244,7 +260,7 @@ def main() -> None:
         if raw_latex_leaks:
             raise AssertionError(f"Found unrendered LaTeX markup in compiled PDF: {raw_latex_leaks}")
 
-        fonts_out = subprocess.run(["pdffonts", str(pdf_path)], check=True, capture_output=True, text=True).stdout
+        fonts_out = subprocess.run(["pdffonts", str(pdf_path)], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
         fonts_lower = fonts_out.lower()
         if "timesnewroman" not in fonts_lower:
             raise AssertionError(f"Expected Times New Roman embedded in compiled PDF; pdffonts:\n{fonts_out}")
@@ -322,6 +338,7 @@ def main() -> None:
         "$585.9k",
         "VND 125 million",
         "88 CERTs",
+        "big-data-financial-analyst",
     ]
     stale_found = [
         tok for tok in stale_tokens if (tok in report_txt or tok in readme_txt)

@@ -135,6 +135,9 @@ def build_notebooks():
                 "print(pl.read_csv('../outputs/tables/dq_ytd_monotonicity.csv'))\n"
                 "print('\\n=== Top FDIC CHANGEC1 Exit Codes ===')\n"
                 "print(pl.read_csv('../outputs/tables/exit_changec1_codes.csv').head(8))\n"
+                "import json\n"
+                "print('\\n=== Strictly-DEV Informative Missingness, Tail Failure Rates & Internal Gaps ===')\n"
+                "print(json.dumps(json.loads(Path('../outputs/tables/dq_dev_diagnostics.json').read_text(encoding='utf-8')), indent=2)[:1800])\n"
                 "panel_schema = pl.read_parquet_schema('../data/silver/panel.parquet')\n"
                 "print(f'Silver panel columns ({len(panel_schema)}):', list(panel_schema.keys())[:15], '...')",
             ),
@@ -185,8 +188,12 @@ def build_notebooks():
                 "code",
                 "import json\nfrom IPython.display import Image, display\n"
                 "parity = json.loads(Path('../outputs/tables/spark_polars_parity.json').read_text(encoding='utf-8'))\n"
-                "print('=== PySpark vs Polars Parity Check ===')\n"
+                "print('=== PySpark vs Polars Parity Check (43-yr Fingerprint & 100% 1.68M-Row Full Parity) ===')\n"
                 "print(json.dumps(parity, indent=2))\n"
+                "print(Path('../outputs/tables/spark_full_panel_parity.json').read_text(encoding='utf-8'))\n"
+                "print('\\n=== Polars Thread/Optimizer Ablation & PySpark Shuffle (8 vs 200) Ablation ===')\n"
+                "print(Path('../outputs/tables/part3_engine_ablation.json').read_text(encoding='utf-8'))\n"
+                "print(Path('../outputs/tables/spark_shuffle_ablation.json').read_text(encoding='utf-8'))\n"
                 "print('\\n=== PySpark Catalyst Execution Plan (Excerpt) ===')\n"
                 "print(Path('../outputs/tables/spark_execution_plan.txt').read_text(encoding='utf-8')[:1500])\n"
                 "display(Image(filename='../outputs/figures/part3_scaling_benchmark.png'))",
@@ -232,6 +239,8 @@ def build_notebooks():
                 "diffs = {c: abs((f_full[c].item() or 0.0) - (f_trunc[c].item() or 0.0)) for c in ['eq_asset_ratio', 'texas_ratio', 'nclnls_ratio']}\n"
                 "print('Max abs diff at 2020-12-31 between full (2020-2021) and truncated (2020 only) panel:', diffs)\n"
                 "assert max(diffs.values()) == 0.0, 'Future leakage detected!'\n"
+                "print('\\n=== Full-Panel Real-Data 2015Q4 Causal Truncation Audit (All 26 Features + 7 YTD Flows) ===')\n"
+                "print(Path('../outputs/tables/full_panel_truncation_audit.json').read_text(encoding='utf-8'))\n"
                 "print('\\n=== Top 10 Leakage Parameter Shifts (DEV-only vs Naive Full-Panel Fit) ===')\n"
                 "print(pl.read_csv('../outputs/tables/leak_parameter_shift.csv').head(10))",
             ),
@@ -288,6 +297,9 @@ def build_notebooks():
                 "print(pl.read_csv('../outputs/tables/canary_case_studies.csv'))\n"
                 "print('\\n=== Operational 2026Q2 Top-10 Watchlist (Frozen DEV Model, Unlabelled Tail) ===')\n"
                 "print(pl.read_csv('../outputs/tables/watchlist_2026q2.csv').head(10))\n"
+                "ph = json.loads(Path('../outputs/tables/test_posthoc_diagnostics.json').read_text(encoding='utf-8'))\n"
+                "print('\\n=== Passive Post-Hoc Lead-Time Distribution (1Q-4Q) & Mean Annual AP ===')\n"
+                "print(json.dumps({'lead_time_theta': ph['lead_time_distribution']['theta_star'], 'annual_summary': ph['annual_summary']}, indent=2))\n"
                 "# Live check: Elkan (2001) PriorOddsCalibrator preserves rank order while restoring rare-event prior scale\n"
                 "rng = np.random.default_rng(42)\n"
                 "X_s = rng.normal(size=(400, 4)).astype(np.float32); y_s = (rng.random(400) < 0.02).astype(int)\n"
@@ -393,7 +405,7 @@ def sync_benchmarks_into_docs() -> None:
         f"{fs_snk_e['mb_per_million_rows']:.1f} MB per million rows for `.sink_parquet()` ({fs_snk_e['rows_millions_in_12gb_usable']:.1f} million usable), "
         f"empirically placing the practical 16 GB laptop ceiling at roughly 20 million full-schema rows. "
         f"At equal 4-thread concurrency, PySpark 4.3 (`local[4]`) reproduces identical numeric outputs "
-        f"(${parity_sum_sci}$ yearly-sum parity, $0.000$ sample max diff) in {sp1_4['total_s']:.3f} s at 1x ({sp1_4['peak_rss_tree_mb']:,.1f} MB tree RSS) and "
+        f"(${parity_sum_sci}$ yearly-sum parity, $0.000$ max diff across 100% of all 1,682,616 rows) in {sp1_4['total_s']:.3f} s at 1x ({sp1_4['peak_rss_tree_mb']:,.1f} MB tree RSS) and "
         f"{sp4_4['total_s']:.3f} s at 4x (6.73 million rows, {sp4_4['peak_rss_tree_mb']:,.1f} MB tree RSS; `local[2]`: {sp4_2['total_s']:.3f} s). "
         f"A distributed Spark cluster is therefore unnecessary for bank-level Call Reports below roughly 20 million full-schema rows on a 16 GB laptop and becomes justified only when expanding to "
         f"wide multi-schedule regulatory panels, borrower-level credit registries exceeding $10^8$ rows, or high-frequency interbank payment streams spanning tens to hundreds of gigabytes."
@@ -446,8 +458,8 @@ def sync_benchmarks_into_docs() -> None:
         f"Empirically, single-laptop capacity on the full 67-column production schema therefore saturates around 20 million rows.\n\n"
         f"![Multi-scale execution time and peak RSS memory scaling across Polars, Pandas, and PySpark (1x–8x).](../outputs/figures/part3_scaling_benchmark.png)\n\n"
         f"### 4.3 PySpark Reproduction, Parity Verification, and Cluster Justification\n\n"
-        f"In `scripts/06_spark.py` (1.2 GB driver memory), PySpark Catalyst reproduces Polars outputs identically across all 43 annual partitions, achieving a 0.0 maximum absolute difference across 33,042 sampled rows "
-        f"and a ${parity_sum_sci}$ maximum relative difference in yearly aggregate checksums (`outputs/tables/spark_polars_parity.json`). Inspecting the Catalyst physical plan (`outputs/tables/spark_execution_plan.txt`) explains why Spark lags on single-node workloads: "
+        f"In `scripts/06_spark.py` (1.2 GB driver memory), PySpark Catalyst reproduces Polars outputs identically across 100% of all 1,682,616 rows (0.0 max abs/rel diff, 0 null mismatches; `spark_full_panel_parity.json`; Appendix Table A5) "
+        f"and across all 43 annual checksums (${parity_sum_sci}$ max relative diff; `spark_polars_parity.json`). Inspecting the Catalyst physical plan (`outputs/tables/spark_execution_plan.txt`) explains why Spark lags on single-node workloads: "
         f"Catalyst inserts two full `Exchange` shuffle barriers—first hash-partitioning by (CERT, YEAR) for YTD de-cumulation, then repartitioning by (CERT) for 4-quarter lags—serializing intermediate state across JVM boundaries:\n\n"
         f"```text\n"
         f"# PySpark Catalyst Physical Plan (excerpt, outputs/tables/spark_execution_plan.txt)\n"
@@ -602,6 +614,7 @@ local function render_floating_table(cap_para, tbl, note_para, inline_mode)
   tbl_tex = tbl_tex:gsub("\\endhead", "")
   tbl_tex = tbl_tex:gsub("\\endlastfoot", "")
   tbl_tex = tbl_tex:gsub("\\end{longtable}", "\\bottomrule\n\\end{tabular}")
+  tbl_tex = tbl_tex:gsub("\\begin{minipage}%[b%]", "\\begin{minipage}[t]")
 
   local sz = (inline_mode or ncols >= 6) and "\\footnotesize" or "\\small"
   local sep = (ncols >= 8) and "2.5pt" or "3.5pt"
@@ -920,7 +933,7 @@ def _apply_booktabs_borders(table) -> None:
 def _style_docx_report(docx_path: Path) -> None:
     """Post-process Pandoc DOCX to match the Q1 finance journal PDF (Times New Roman 12pt, booktabs tables, shaded Abstract, APA hanging-indent references)."""
     from docx import Document
-    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml.ns import qn
     from docx.shared import Inches, Pt
@@ -1082,6 +1095,7 @@ def _style_docx_report(docx_path: Path) -> None:
         cell_pt = Pt(9.5) if ncols >= 7 else Pt(10.5)
         for r_idx, row in enumerate(tbl.rows):
             for cell in row.cells:
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
                 for p in cell.paragraphs:
                     p.paragraph_format.line_spacing = 1.08
                     p.paragraph_format.space_before = Pt(1.5)
@@ -1173,6 +1187,7 @@ def build_report_pdf_and_docx(md_path: Path, strict_pdf: bool = False) -> Path:
                     check=True,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
                 )
                 shutil.copy2(tmp_pdf, pdf_path)
                 log.info(f"Compiled Q1-journal LaTeX PDF report (Times New Roman 12pt + TeX Gyre Termes Math) to {pdf_path}")
@@ -1202,6 +1217,7 @@ def build_report_pdf_and_docx(md_path: Path, strict_pdf: bool = False) -> Path:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
             _style_docx_report(tmp_docx)
             shutil.copy2(tmp_docx, docx_path)

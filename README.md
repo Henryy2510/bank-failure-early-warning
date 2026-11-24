@@ -48,7 +48,7 @@ Supervisory Modelling & Evaluation (outputs/tables/test_results.json)
 ## 2. Repository Structure
 
 ```text
-final/
+bank-failure-early-warning/
 ├── README.md                          # End-to-end execution guide, results summary & citations
 ├── requirements.txt                   # Pinned Python 3.12 dependencies
 ├── config.yaml                        # Central configuration (paths, temporal splits, seed=42, costs)
@@ -89,9 +89,9 @@ final/
 ├── report/                            # Final Research Report deliverables
 │   ├── report.md                      # Full English report in GitHub Markdown
 │   ├── QuanHuuNhatMinh_11230998_Final_Report.docx       # Formatted Word document with embedded tables and figures
-│   └── QuanHuuNhatMinh_11230998_Final_Report.pdf        # Final PDF report (20 main pages + 4-page appendix; <= 20 main + <= 10 appendix)
+│   └── QuanHuuNhatMinh_11230998_Final_Report.pdf        # Final PDF report (20 main pages + 6-page appendix; <= 20 main + <= 10 appendix)
 └── tests/
-    └── test_pipeline.py               # Automated pytest suite (20 tests: completeness, de-YTD, CBLR zero-fix, forbidden cols, post-failure filter, CV purge, leakage invariance, C_FP stability interval, frozen_protocol manifest, Spark local[2]/local[4] parity, non-degenerate cost threshold, README paths, PDF pages)
+    └── test_pipeline.py               # Automated pytest suite (22 tests: completeness, de-YTD, CBLR zero-fix, forbidden cols, post-failure filter, CV purge, full-panel 2015Q4 26-feature causal truncation, preprocessor leakage invariance, DEV tail/gap diagnostics, 100% 1.68M Spark parity, Polars/Spark ablations, post-hoc lead-time/annual AP parity, C_FP stability interval, frozen_protocol manifest, non-degenerate cost threshold, README paths, PDF pages)
 ```
 
 > **Note on Data Files:** Per course submission rules, `data/` (`bronze/`, `silver/`, `gold/`) and `*.parquet` files are excluded via `.gitignore` and are not committed to Git.
@@ -99,6 +99,8 @@ final/
 ---
 
 ## 3. Reproducing the Entire Pipeline End-to-End
+
+Run all commands below from the repository root (`bank-failure-early-warning/`), which contains `requirements.txt`, `run_all.ps1`, and `run_all.sh`. If you downloaded a ZIP, extract it and open a terminal in that directory first.
 
 ### 3.1 Prerequisites
 * **OS:** Linux, macOS, or **native Windows 10/11 (PowerShell — no WSL required)** (WSL2 also supported).
@@ -132,40 +134,70 @@ final/
    ```
 
 ### 3.3 Setup & Execution — Native Windows 10/11 (PowerShell, No WSL Required)
-All Python scripts, benchmarks (using `psutil` peak working-set RSS fallback when Unix `resource` is absent), PySpark jobs, and tests run natively on Windows without WSL:
-1. **Install Python 3.12 and OpenJDK 17** (in PowerShell):
+Open PowerShell in the repository root, where `requirements.txt` and `run_all.ps1` are located. Start with the steps below; `run_all.ps1` and `scripts/06_spark.py` automatically download and configure Hadoop `winutils.exe` + `hadoop.dll` into `.hadoop\bin` on first run if `HADOOP_HOME` (or `C:\hadoop\bin`) is not already present. A full Hadoop installation or cluster is not needed for this local pipeline.
+
+1. **Install Python 3.12 and OpenJDK 17** (skip installation if already available):
    ```powershell
    winget install Python.Python.3.12
    winget install EclipseAdoptium.Temurin.17.JDK
    ```
-   Open a new PowerShell window and verify `py -3.12 --version` and `java -version`. Ensure `JAVA_HOME` points to the JDK directory (e.g., `C:\Program Files\Eclipse Adoptium\jdk-17...`).
+   Open a new PowerShell window in the repository root and check:
+   ```powershell
+   py -3.12 --version
+   java -version
+   ```
+   Ensure `JAVA_HOME` points to the JDK directory (e.g., `C:\Program Files\Eclipse Adoptium\jdk-17...`).
 2. **Hadoop `winutils` (handled automatically on Windows):**
    * **No manual Hadoop setup is required** when online: `run_all.ps1` and `scripts/06_spark.py` automatically download `winutils.exe` + `hadoop.dll` into `.hadoop\bin` and configure `HADOOP_HOME` + `PATH` on first run if `HADOOP_HOME` (or `C:\hadoop\bin`) is not already present.
    * *(Offline fallback only)*: place Hadoop 3.3.x `winutils.exe` and `hadoop.dll` into `.hadoop\bin` (or `C:\hadoop\bin` with `$env:HADOOP_HOME = "C:\hadoop"` and `$env:PATH = "$env:HADOOP_HOME\bin;$env:PATH"`).
-3. **(Optional — only if you want Step 8 to recompile PDF/DOCX locally):**
-   ```powershell
-   winget install JohnMacFarlane.Pandoc
-   winget install MiKTeX.MiKTeX
-   winget install oschwartz10612.Poppler
-   ```
-   (`Times New Roman` and `Courier New` are pre-installed on Windows; in MiKTeX Console enable automatic on-the-fly package installation for `mdframed`, `titlesec`, `fancyhdr`, and `tex-gyre-math`. Skipping this step is safe — Step 8 will warn and keep the pre-compiled report files intact.)
-4. **Create the virtual environment and install pinned packages** (inside `final\`):
+3. **Create the virtual environment and install pinned packages:**
    ```powershell
    py -3.12 -m venv .venv
-   .venv\Scripts\python.exe -m pip install -r requirements.txt
+   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
    ```
-5. **Verify or Download Raw FDIC Data:**
+   The runner uses this environment automatically; activation is not required.
+4. **Verify or download raw FDIC data:**
+   If `.\data_raw\fdic` already contains the data, verify it offline:
    ```powershell
-   # Offline verification if .\data_raw\fdic already exists:
-   .venv\Scripts\python.exe scripts\00_download.py --verify-only
-
-   # Or download fresh from FDIC API (~45-60 min, resumable):
-   .venv\Scripts\python.exe scripts\00_download.py --download --out .\data_raw\fdic
+   .\.venv\Scripts\python.exe scripts\00_download.py --verify-only
    ```
-6. **Run All Stages & Tests with One Command:**
+   If the data is missing, download it first (~45–60 minutes; resumable):
+   ```powershell
+   .\.venv\Scripts\python.exe scripts\00_download.py --download --out .\data_raw\fdic
+   ```
+5. **Run the full pipeline and tests:**
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\run_all.ps1
    ```
+   This reruns all stages (`00–09`, including PySpark via auto-bootstrapped `.hadoop\bin`), benchmarks, models, notebooks, and `pytest` (verified end-to-end on native Windows 11 PowerShell in `1,154 s`; see screenshot below).
+
+#### Windows troubleshooting — only if needed
+
+**Java is not found or `JAVA_HOME` is invalid:** Ensure OpenJDK 17 is installed. Set `JAVA_HOME` to its actual installation directory (not its `bin` directory), then retry in the same PowerShell window:
+```powershell
+# Replace this example with the actual JDK folder on your machine:
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\YOUR_JDK_FOLDER"
+$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+java -version
+```
+
+**Offline environment without Hadoop `winutils.exe` / `hadoop.dll`:** When internet access is unavailable on a fresh machine, automatic `.hadoop\bin` bootstrap cannot fetch binaries from GitHub:
+1. Obtain Windows `winutils.exe` and `hadoop.dll` matching the Hadoop version bundled with PySpark (check `hadoop-client-api-*.jar` in `.venv\Lib\site-packages\pyspark\jars`).
+2. Place both files in `.hadoop\bin` (or `C:\hadoop\bin` and set `$env:HADOOP_HOME = "C:\hadoop"; $env:PATH = "$env:HADOOP_HOME\bin;$env:PATH"`), then rerun `powershell -ExecutionPolicy Bypass -File .\run_all.ps1`.
+
+#### Optional — rebuild PDF/DOCX locally
+
+Precompiled reports are included in `report/`. To enable local recompilation, install:
+```powershell
+winget install JohnMacFarlane.Pandoc
+winget install MiKTeX.MiKTeX
+winget install oschwartz10612.Poppler
+```
+`Times New Roman` and `Courier New` are pre-installed on Windows. In MiKTeX Console, enable automatic package installation for `mdframed`, `titlesec`, `fancyhdr`, and `tex-gyre-math`. If the report toolchain is unavailable, Step 8 is designed to warn and preserve the precompiled files. Poppler provides the optional PDF inspection commands used in Step 9.
+
+![Ảnh minh chứng chạy hoàn thiện trên window](outputs/figures/windows_run_all_verification.jpg)
+
+*Ảnh minh chứng chạy hoàn thiện trên window*
 
 ### 3.4 Pipeline Stage Breakdown (`run_all.sh` / `run_all.ps1`)
 Both runners execute Steps `00` through `09`, log per-step wall-clock times to `outputs/tables/run_all_timing.txt`, and run `pytest -v tests/`:
@@ -179,7 +211,7 @@ Both runners execute Steps `00` through `09`, log per-step wall-clock times to `
 * **Step 7 (`07_model.py`):** Runs 5-fold expanding walk-forward CV on `DEV` (`760,559` OOF rows, `1,522` OOF failing banks; `2,661` total `DEV` failing banks), audits leakage shifts & `FAILURE`-only label sensitivity, calibrates cost-optimal threshold (θ\* = 0.0039), computes capacity budgets (`Top 1%, 2%, 5%`), evaluates once on `TEST`, scores `2026Q2` live operational watchlist (`watchlist_2026q2.csv`), and plots curves & trajectories.
 * **Step 8 (`08_build_notebooks_and_report.py`):** Executes `notebooks/*.ipynb` via `nbclient`, synchronizes `report/report.md` and `README.md` benchmark tables from `outputs/tables/`, and recompiles `report/QuanHuuNhatMinh_11230998_Final_Report.docx` and `.pdf` (automatically skipping PDF/DOCX compilation with a warning if `pandoc`/`xelatex` is absent, while keeping pre-compiled files intact).
 * **Step 9 (`09_check_report_numbers.py`):** Verifies that all key metrics in `report/report.md` and `README.md` match the generated JSON/CSV files (and inspects PDF page limits and embedded fonts when `poppler-utils` is available).
-* **Tests (`pytest tests/`):** Runs 20 automated unit/integration tests verifying manifest completeness, YTD de-cumulation, CBLR zero recoding & negative stock sanitization, forbidden outcome column exclusion, zero post-failure Gold rows, strict CV purges, preprocessor leakage invariance, `cfp_stability_interval.json` linear-cost decomposition, `frozen_protocol.json` audit manifest SHA-256 fingerprints, Polars–PySpark parity (`local[2]` & `local[4]`), non-degenerate cost threshold, capacity points, explainability, Canary studies, upgraded artifacts, README script paths (`run_all.sh` & `run_all.ps1`), and the PDF page ceiling.
+* **Tests (`pytest tests/`):** Runs 22 automated unit/integration tests verifying manifest completeness, YTD de-cumulation, CBLR zero recoding & negative stock sanitization, forbidden outcome column exclusion, zero post-failure Gold rows, strict CV purges, full-panel 2015Q4 real-data causal truncation across all 26 CAMELS features + 7 flows (`0.0` diff), preprocessor leakage invariance, DEV tail/gap diagnostics, 100% 1.68M-row Polars–PySpark parity, Polars/Spark engine & shuffle ablations, post-hoc lead-time & annual AP parity, `cfp_stability_interval.json`, `frozen_protocol.json` SHA-256 fingerprints, non-degenerate cost threshold, capacity points, explainability, Canary studies, README paths (`run_all.sh` & `run_all.ps1`), and the PDF page ceiling.
 
 ---
 

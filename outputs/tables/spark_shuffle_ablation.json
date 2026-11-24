@@ -1,0 +1,31 @@
+{
+  "master": "local[4]",
+  "scale": "1x",
+  "repeat": 2,
+  "shuffle_8": {
+    "scale": "1x",
+    "scale_factor": 1,
+    "rows": 1682616,
+    "engine": "PySpark local[4]",
+    "threads": 4,
+    "shuffle_partitions": 8,
+    "spark_startup_s": 3.568,
+    "compute_s": 6.356,
+    "total_s": 9.924,
+    "peak_rss_tree_mb": 1270.2
+  },
+  "shuffle_200_default": {
+    "scale": "1x",
+    "scale_factor": 1,
+    "rows": 1682616,
+    "engine": "PySpark local[4]",
+    "threads": 4,
+    "shuffle_partitions": 200,
+    "spark_startup_s": 3.627,
+    "compute_s": 6.209,
+    "total_s": 9.836,
+    "peak_rss_tree_mb": 1349.0
+  },
+  "compute_speedup_8_vs_200": 0.98,
+  "total_speedup_8_vs_200": 0.99
+}

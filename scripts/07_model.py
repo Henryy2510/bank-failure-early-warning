@@ -1,6 +1,7 @@
 """Part 5: Model Training, Walk-Forward Validation, Cost-Sensitive Thresholding, and Test Set Evaluation."""
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -14,7 +15,7 @@ import matplotlib.pyplot as plt
 import polars as pl
 from datetime import datetime
 
-from src.bfews.modeling import execute_full_modeling_workflow
+from src.bfews.modeling import compute_posthoc_test_diagnostics, execute_full_modeling_workflow
 from src.bfews.utils import data_dir, df_to_markdown, get_logger, out_dir, save_json
 
 log = get_logger("07_model")
@@ -298,8 +299,20 @@ def plot_alarms_and_canary_trajectories():
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--posthoc-diagnostics-only",
+        action="store_true",
+        help="Compute passive post-hoc lead-time & annual AP diagnostics without modifying test_results.json.",
+    )
+    args = ap.parse_args()
+    if args.posthoc_diagnostics_only:
+        compute_posthoc_test_diagnostics()
+        return
+
     log.info("Starting Part 5: Full Modeling, Cross-Validation & Test Evaluation...")
     results = execute_full_modeling_workflow()
+    compute_posthoc_test_diagnostics()
 
     # Save summary table
     cv_models = results["cross_validation_models"]

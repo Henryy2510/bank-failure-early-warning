@@ -90,3 +90,16 @@ In **2020-2026**, `45,865` / `123,461` (**37.15%**) rows record `RBCRWAJ == 0`, 
 | Merger vs failure | exit classification | merger = censored, y = 0 | healthy acquired banks are not failures |
 | Publication lag | 59.1% of failures | rows that failed before availability are non-scorable | no look-ahead in training or evaluation |
 | Assistance vs closure | RESTYPE | both are failure events (DEV sensitivity vs FAILURE-only reported; TEST has 0 ASSISTANCE) | transparent |
+
+## 7. Strictly-DEV Empirical Justification (Gaps, Informative Missingness & Tails)
+- Real internal reporting gaps across 1984Q1–2026Q2: **32** banks (33 gap events; 92 missing bank-quarters), triggering `ytd_prev_ok` on **12** intra-year rows and `lag4_ok` on **114** 4Q-lag rows.
+- Strictly DEV (`<= 2007-12-31`, `pit_scorable`, base failure rate **0.723%**): `EQ < 0` rows exhibit **26.14%** failure rate (**36.2x** lift), proving extreme tails must be winsorised in-fold rather than dropped.
+
+| segment | rows | share_of_dev_rows_pct | share_of_all_dev_positives_pct | fail_rate_pct | lift_vs_dev_base |
+|---|---|---|---|---|---|
+| Negative equity (EQ < 0) | 13215 | 1.08 | 39.05 | 26.14 | 36.2 |
+| Bottom 1% eq_asset_ratio (< -0.0035) | 12206 | 1 | 36.86 | 26.71 | 36.9 |
+| Top 1% texas_ratio (>= 10.000) | 15611 | 1.28 | 34.36 | 19.47 | 26.9 |
+| Bottom 1% ROA (< -5.75%) | 12235 | 1 | 25.32 | 18.3 | 25.3 |
+| Outer 1% ROA tails (< -5.75% or > 3.71%) | 24470 | 2 | 25.63 | 9.26 | 12.8 |
+| Union of 1% distress tails (EQ<0 or bot-1% EQ/ROA or top-1% Texas) | 25795 | 2.11 | 49.13 | 16.84 | 23.3 |
