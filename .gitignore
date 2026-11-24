@@ -9,6 +9,7 @@ metastore_db/
 
 # Python virtual environments & local runtime
 .venv/
+.hadoop/
 py312/
 __pycache__/
 *.py[cod]

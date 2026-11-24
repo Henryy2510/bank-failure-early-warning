@@ -103,7 +103,7 @@ final/
 ### 3.1 Prerequisites
 * **OS:** Linux, macOS, or **native Windows 10/11 (PowerShell — no WSL required)** (WSL2 also supported).
 * **Python:** Python `3.12+`
-* **Java (for PySpark 4.3):** OpenJDK `17` or `21` (`java -version`). On native Windows, PySpark also requires `JAVA_HOME` and Hadoop `winutils.exe` + `hadoop.dll` under `%HADOOP_HOME%\bin` (see Section 3.3).
+* **Java (for PySpark 4.3):** OpenJDK `17` or `21` (`java -version`). On native Windows, `JAVA_HOME` should point to the JDK directory; `run_all.ps1` and `scripts/06_spark.py` automatically download and configure Hadoop `winutils.exe` + `hadoop.dll` into `.hadoop\bin` on first run if `HADOOP_HOME` is not already set (see Section 3.3).
 * **Optional — Report PDF/DOCX Recompilation & PDF Audit Tools (Steps 8–9):**
   * `pandoc` (`>= 3.0`) and `xelatex` (TeX Live `texlive-xetex` + `texlive-latex-extra` for `mdframed`, `titlesec`, `fancyhdr`, `booktabs` on Linux/macOS; or MiKTeX on Windows), plus system fonts **`Times New Roman`**, **`Courier New`**, and **`TeX Gyre Termes Math`** (`texgyretermes-math.otf`; `Times New Roman` and `Courier New` are pre-installed on Windows and macOS; on Debian/Ubuntu install `ttf-mscorefonts-installer` and `fonts-texgyre` / `texlive-fonts-recommended`).
   * Optional `poppler-utils` (`pdfinfo`, `pdftotext`, `pdffonts`) for automated PDF page-count and embedded-font inspection in Step 9 and `pytest`.
@@ -139,13 +139,9 @@ All Python scripts, benchmarks (using `psutil` peak working-set RSS fallback whe
    winget install EclipseAdoptium.Temurin.17.JDK
    ```
    Open a new PowerShell window and verify `py -3.12 --version` and `java -version`. Ensure `JAVA_HOME` points to the JDK directory (e.g., `C:\Program Files\Eclipse Adoptium\jdk-17...`).
-2. **Configure Hadoop `winutils` (required by PySpark local Parquet I/O on native Windows):**
-   * Create `C:\hadoop\bin` and place matching Hadoop 3.x `winutils.exe` and `hadoop.dll` inside `C:\hadoop\bin` (e.g., from `cdarlint/winutils` or `kontext-tech/winutils` for Hadoop `3.3.x`/`3.4.x`).
-   * Set environment variables (current session or System Environment Variables):
-     ```powershell
-     $env:HADOOP_HOME = "C:\hadoop"
-     $env:PATH = "$env:HADOOP_HOME\bin;$env:PATH"
-     ```
+2. **Hadoop `winutils` (handled automatically on Windows):**
+   * **No manual Hadoop setup is required** when online: `run_all.ps1` and `scripts/06_spark.py` automatically download `winutils.exe` + `hadoop.dll` into `.hadoop\bin` and configure `HADOOP_HOME` + `PATH` on first run if `HADOOP_HOME` (or `C:\hadoop\bin`) is not already present.
+   * *(Offline fallback only)*: place Hadoop 3.3.x `winutils.exe` and `hadoop.dll` into `.hadoop\bin` (or `C:\hadoop\bin` with `$env:HADOOP_HOME = "C:\hadoop"` and `$env:PATH = "$env:HADOOP_HOME\bin;$env:PATH"`).
 3. **(Optional — only if you want Step 8 to recompile PDF/DOCX locally):**
    ```powershell
    winget install JohnMacFarlane.Pandoc

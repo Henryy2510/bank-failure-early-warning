@@ -2,32 +2,110 @@
 from __future__ import annotations
 
 import io
+import os
 import time
+import urllib.error
+import urllib.request
 from contextlib import redirect_stdout
 from pathlib import Path
 
 from .core import texas_cap
-from .utils import cfg, data_dir, get_logger
+from .utils import ROOT, cfg, data_dir, get_logger
 
 log = get_logger("spark")
+
+_WINUTILS_MIRRORS = (
+    "https://raw.githubusercontent.com/cdarlint/winutils/master/hadoop-3.3.6/bin",
+    "https://raw.githubusercontent.com/cdarlint/winutils/master/hadoop-3.3.5/bin",
+)
+_MIN_HADOOP_BIN_BYTES = 10_000
+
+
+def _has_hadoop_bins(home: Path) -> bool:
+    """Return True if `home/bin` contains valid winutils.exe and hadoop.dll binaries."""
+    bin_dir = home / "bin"
+    return all(
+        (bin_dir / name).is_file() and (bin_dir / name).stat().st_size > _MIN_HADOOP_BIN_BYTES
+        for name in ("winutils.exe", "hadoop.dll")
+    )
+
+
+def _download_hadoop_bins(target_home: Path) -> None:
+    """Download winutils.exe and hadoop.dll into `target_home/bin` from known mirrors."""
+    bin_dir = target_home / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    last_err: Exception | None = None
+    for base_url in _WINUTILS_MIRRORS:
+        try:
+            for name in ("winutils.exe", "hadoop.dll"):
+                dest = bin_dir / name
+                if dest.is_file() and dest.stat().st_size > _MIN_HADOOP_BIN_BYTES:
+                    continue
+                req = urllib.request.Request(
+                    f"{base_url}/{name}",
+                    headers={"User-Agent": "BFT65B-Pipeline"},
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = resp.read()
+                if len(data) <= _MIN_HADOOP_BIN_BYTES or not data.startswith(b"MZ"):
+                    raise ValueError(f"Invalid PE binary downloaded from {base_url}/{name}")
+                tmp = dest.with_suffix(dest.suffix + ".tmp")
+                tmp.write_bytes(data)
+                os.replace(tmp, dest)
+            return
+        except (OSError, ValueError, urllib.error.URLError) as exc:
+            last_err = exc
+    raise RuntimeError(
+        f"Failed to auto-download Windows Hadoop binaries (winutils.exe, hadoop.dll) into {bin_dir}. "
+        f"Please place both files in {bin_dir} or set HADOOP_HOME manually. Last error: {last_err}"
+    )
+
+
+def _ensure_windows_hadoop() -> Path | None:
+    """Ensure HADOOP_HOME and PATH expose winutils.exe and hadoop.dll on native Windows."""
+    if os.name != "nt":
+        return None
+
+    candidates: list[Path] = []
+    env_home = os.environ.get("HADOOP_HOME", "").strip()
+    if env_home:
+        candidates.append(Path(env_home))
+    candidates.extend([ROOT / ".hadoop", Path("C:/hadoop")])
+
+    hadoop_home = next((c for c in candidates if _has_hadoop_bins(c)), None)
+    if hadoop_home is None:
+        hadoop_home = ROOT / ".hadoop"
+        log.info(f"Windows Hadoop binaries missing; auto-downloading winutils.exe & hadoop.dll to {hadoop_home / 'bin'}...")
+        _download_hadoop_bins(hadoop_home)
+
+    os.environ["HADOOP_HOME"] = str(hadoop_home)
+    bin_str = str(hadoop_home / "bin")
+    path_parts = os.environ.get("PATH", "").split(os.pathsep)
+    if not any(p.strip().lower() == bin_str.lower() for p in path_parts if p):
+        os.environ["PATH"] = f"{bin_str}{os.pathsep}{os.environ.get('PATH', '')}"
+    return hadoop_home
+
+
+def _jvm_prop(key: str, val: str) -> str:
+    """Format a `-Dkey=val` JVM property, quoting if `val` contains spaces."""
+    return f'"-D{key}={val}"' if " " in val else f"-D{key}={val}"
 
 
 def get_spark_session(app_name: str = "BFT65B-BankFailurePipeline", master: str | None = None):
     """Local SparkSession with a conservative memory configuration for a laptop."""
-    import os
     import re
     import sys
     import tempfile
     from pyspark.sql import SparkSession
 
+    hadoop_home = _ensure_windows_hadoop()
     os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
     derby_home = (Path(tempfile.gettempdir()) / "derby").as_posix()
-    java_opts = (
-        f"-XX:+UseG1GC -Dderby.system.home={derby_home}"
-        if " " not in derby_home
-        else f'-XX:+UseG1GC "-Dderby.system.home={derby_home}"'
-    )
+    jvm_parts = ["-XX:+UseG1GC", _jvm_prop("derby.system.home", derby_home)]
+    if hadoop_home is not None:
+        jvm_parts.append(_jvm_prop("hadoop.home.dir", hadoop_home.as_posix()))
+    java_opts = " ".join(jvm_parts)
     s = cfg()["spark"]
     m = master or s["master"]
     match = re.fullmatch(r"local\[(\d+)\]", m.strip())

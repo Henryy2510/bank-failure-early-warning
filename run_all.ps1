@@ -48,6 +48,73 @@ function Invoke-Step {
     Add-Content -Path $TimingFile -Value $line -Encoding UTF8
 }
 
+function Test-HadoopBins {
+    param([Parameter(Mandatory = $true)][string]$HomeDir)
+    if ([string]::IsNullOrWhiteSpace($HomeDir)) { return $false }
+    $winutils = Join-Path $HomeDir "bin\winutils.exe"
+    $hadoopDll = Join-Path $HomeDir "bin\hadoop.dll"
+    return (Test-Path $winutils) -and (Test-Path $hadoopDll) -and
+           ((Get-Item $winutils).Length -gt 10000) -and ((Get-Item $hadoopDll).Length -gt 10000)
+}
+
+function Ensure-WindowsHadoop {
+    $candidates = @()
+    if ($env:HADOOP_HOME) { $candidates += $env:HADOOP_HOME }
+    $candidates += (Join-Path $ScriptDir ".hadoop")
+    $candidates += "C:\hadoop"
+
+    $resolved = $null
+    foreach ($cand in $candidates) {
+        if (Test-HadoopBins $cand) {
+            $resolved = $cand
+            break
+        }
+    }
+
+    if (-not $resolved) {
+        $resolved = Join-Path $ScriptDir ".hadoop"
+        $binDir = Join-Path $resolved "bin"
+        New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+        Write-Host "Downloading Windows Hadoop binaries (winutils.exe, hadoop.dll) to $binDir ..."
+        $mirrors = @(
+            "https://raw.githubusercontent.com/cdarlint/winutils/master/hadoop-3.3.6/bin",
+            "https://raw.githubusercontent.com/cdarlint/winutils/master/hadoop-3.3.5/bin"
+        )
+        $downloaded = $false
+        foreach ($baseUrl in $mirrors) {
+            try {
+                foreach ($name in @("winutils.exe", "hadoop.dll")) {
+                    $dest = Join-Path $binDir $name
+                    if ((Test-Path $dest) -and ((Get-Item $dest).Length -gt 10000)) { continue }
+                    $tmp = "$dest.tmp"
+                    Invoke-WebRequest -Uri "$baseUrl/$name" -OutFile $tmp -UseBasicParsing -Headers @{ "User-Agent" = "BFT65B-Pipeline" } -TimeoutSec 30
+                    $bytes = [System.IO.File]::ReadAllBytes($tmp)
+                    if ($bytes.Length -le 10000 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+                        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+                        throw "Invalid PE binary from $baseUrl/$name"
+                    }
+                    Move-Item -Path $tmp -Destination $dest -Force
+                }
+                $downloaded = $true
+                break
+            } catch {
+                Write-Warning "Mirror failed ($baseUrl): $_"
+            }
+        }
+        if (-not $downloaded) {
+            throw "Failed to download winutils.exe / hadoop.dll. Place them in $binDir or set HADOOP_HOME manually."
+        }
+    }
+
+    $env:HADOOP_HOME = $resolved
+    $binPath = Join-Path $resolved "bin"
+    $pathParts = ($env:PATH -split ";") | Where-Object { $_ }
+    if (-not ($pathParts | Where-Object { $_.Trim().ToLowerInvariant() -eq $binPath.ToLowerInvariant() })) {
+        $env:PATH = "$binPath;$env:PATH"
+    }
+    Write-Host "Using HADOOP_HOME: $env:HADOOP_HOME"
+}
+
 Write-Host "========================================================================"
 Write-Host "BFT65B: FDIC Bank Failure Early Warning Big-Data Pipeline (Windows)"
 Write-Host "National Economics University - Big Data Analytics in Finance"
@@ -63,8 +130,9 @@ try {
     # Ignore if WMI/CIM is unavailable
 }
 if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
-    Write-Warning "Java (OpenJDK 17 or 21) was not found on PATH. Step 6 (PySpark) requires Java + JAVA_HOME + HADOOP_HOME (winutils.exe)."
+    Write-Warning "Java (OpenJDK 17 or 21) was not found on PATH. Step 6 (PySpark) requires OpenJDK 17 or 21 with JAVA_HOME."
 }
+Ensure-WindowsHadoop
 Write-Host "Start Time: $(Get-Date)"
 
 Invoke-Step "[Step 0/9] Part 1: Verifying Raw FDIC Data Completeness" @("scripts\00_download.py", "--verify-only")
